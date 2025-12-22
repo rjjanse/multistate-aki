@@ -1,7 +1,7 @@
 #----------------------------------------------------------#
 # Predicting outcomes after AKI using multistate models
 # Code for cohort derivation
-# Roemer J. Janse - Last updated on 2025-09-24
+# Roemer J. Janse - Last updated on 2025-10-30
 #----------------------------------------------------------#
 
 # 0. Set-up ----
@@ -62,6 +62,10 @@ dat_proc <- cleaned_dataset %>%
   mutate(code_dt = as.Date(date_start),
          .keep = "unused")
 
+# Save cleaned data
+save(dat_proc,
+     file = paste0(path, "dataframes/diagnoses_procedures.Rdata"))
+
 # Load laboratory data
 load(paste0(path, "cleaned_DV_lab_and_measurements.Rdata"))
 
@@ -73,10 +77,14 @@ dat_lab <- cleaned_dataset %>%
   mutate(lab_dt = as.Date(date),
          .keep = "unused")
 
+# Save cleaned data
+save(dat_lab,
+     file = paste0(path, "dataframes/laboratory.Rdata"))
+
 # Load creatinine data
 load(paste0(path, "cleaned_DV_lab_SCr_AKI.Rdata"))
 
-# Clean laboratory data
+# Clean creatinine data
 dat_scr <- cleaned_dataset %>%
   # Set all column names to lower case
   set_colnames(tolower(colnames(.))) %>%
@@ -87,6 +95,10 @@ dat_scr <- cleaned_dataset %>%
          .keep = "unused") %>%
   # Rename creatinine
   rename(creat = creatinine_bl_umol_l)
+
+# Save cleaned data
+save(dat_scr,
+     file = paste0(path, "dataframes/creats.Rdata"))
 
 # 2. Cohort spine ----
 # We create the cohort spine based on AKI hospitalisation
@@ -240,8 +252,3 @@ dat_spine <- dat_spine %>%
 # Save data
 save(dat_spine,
      file = paste0(path, "dataframes/cohort_derivation.Rdata"))
-
-
-
-
-
