@@ -19,7 +19,7 @@ pacman::p_load("dplyr",          # Data wrangling
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
 # Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/17092025/"
+path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/14012026/"
 
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
@@ -40,6 +40,8 @@ load(paste0(path, "cleaned_DV_lab_SCr_AKI.Rdata"))
 dat_hosp <- cleaned_dataset %>%
   # Set all column names to lower case
   set_colnames(tolower(colnames(.))) %>%
+  # Arrange date based on hour
+  arrange(date) %>%
   # Set POSIXct dates to Date format
   mutate(across(c("admission_date", "discharge_date"), as.Date)) %>% 
   # Rename variables
@@ -48,6 +50,10 @@ dat_hosp <- cleaned_dataset %>%
          dialysis = any_dialysis,
          stage = aki_stage_incl365d,
          pre_aki_creat = creatinine_bl_umol_l) 
+
+# Save clean hospitalisation data
+save(dat_hosp,
+     file = paste0(path, "dataframes/hosps.Rdata"))
 
 # Load procedure data
 load(paste0(path, "cleaned_DV_ICD10codes_procedures.Rdata"))
@@ -100,30 +106,50 @@ dat_scr <- cleaned_dataset %>%
 save(dat_scr,
      file = paste0(path, "dataframes/creats.Rdata"))
 
+# Load data frames
+load(paste0(path, "dataframes/hosps.Rdata"))
+load(paste0(path, "dataframes/diagnoses_procedures.Rdata"))
+load(paste0(path, "dataframes/laboratory.Rdata"))
+load(paste0(path, "dataframes/creats.Rdata"))
+
 # 2. Cohort spine ----
 # We create the cohort spine based on AKI hospitalisation
 # Number of individuals
 n_distinct(dat_hosp[["id"]]) # n = 567,526
 
-# Clean data
-dat_spine <- dat_hosp %>%
-  # Drop any non-hospitalisations
-  filter(!is.na(admission_dt) & !is.infinite(admission_dt)) %>%
+# Clean data 
+# Save twice for later inclusion criterion
+dat_spine <- (dat_ongoing_aki <- dat_hosp %>%
   # Drop non-AKI's
   filter(!is.na(aki_episode_incl365d)) %>%
-  # Arrange to put first aki on top
-  arrange(id, admission_dt) %>%
-  # Group per individual
-  group_by(id) %>%
-  # Keep first AKI per individual
+  # Arrange per person per AKI episode
+  arrange(id, aki_episode_incl365d) %>%
+  # Group per person per AKI epsiode
+  group_by(id, aki_episode_incl365d) %>%
+  # Information about AKI stage is stored in the first row, so we want to keep that row; 
+  # the overlapping hospitalisation is taken from rows further down
+  fill(admission_dt, discharge_dt, .direction = "down") %>%
+  # Keep only first AKI episode for each individual
+  filter(aki_episode_incl365d == 1)) %>%
+  # Keep first row per individual
   slice(1L) %>%
   # Remove grouping structure
   ungroup() %>%
   # Keep only relevant variables
   select(id, sex, dob, pre_aki_creat, admission_dt, discharge_dt, dialysis, stage)
          
+# Determine max stage (separately as sometimes, two AKIs occur during hospitalisation and we want
+# to take the max stage of any AKI during hospitalisation
+
+
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 40,449
+n_distinct(dat_spine[["id"]]) # n = 51,058
+
+# Exclude individuals with AKI that was never seen in-hospital 
+dat_spine %<>% filter(!is.na(admission_dt) & !is.infinite(admission_dt))
+
+# Number of individuals
+n_distinct(dat_spine[["id"]]) # n = 37,199
 
 # Keep hospitalisations only if discharge was from 2012 onwards
 dat_spine %<>%
@@ -142,14 +168,14 @@ dat_spine %<>%
   select(id, age, female, pre_aki_egfr, admission_dt, discharge_dt, stage, dialysis)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 14,164
+n_distinct(dat_spine[["id"]]) # n = 12,628
 
 # 3. Apply other inclusion criteria ----
 # Age of 18 years and older
 dat_spine %<>% filter(age >= 18)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 11,481
+n_distinct(dat_spine[["id"]]) # n = 10,248
 
 ## No previous maintenance dialysis
 # Select individuals with maintenance dialysis
@@ -172,7 +198,7 @@ vec_main_dial <- dat_proc %>%
 dat_spine %<>% filter(!(id %in% vec_main_dial))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 10,769
+n_distinct(dat_spine[["id"]]) # n = 9,731
 
 ## No previous kidney transplantation
 # Select individuals with kidney transplantation
@@ -195,7 +221,35 @@ vec_ktx <- dat_proc %>%
 dat_spine %<>% filter(!(id %in% vec_ktx))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 10,328
+n_distinct(dat_spine[["id"]]) # n = 9,350
+
+## Ongoing AKI
+# Determine ongoing AKIs
+vec_ongoing_aki <- dat_ongoing_aki %>%
+  # Arrange for grouping
+  arrange(id) %>%
+  # Group per individual
+  group_by(id) %>%
+  # Get date of last AKI observation
+  mutate(last_aki_measurement = as.Date(last(date))) %>%
+  # Join index date of each individual
+  left_join(dat_spine %>% 
+              # Only relevant variables
+              select(id, discharge_dt),
+            # Join by ID
+            "id") %>%
+  # Keep individuals that had their last AKI measurement no later than discharge from their index hospitalisation
+  filter(last_aki_measurement > discharge_dt.y) %>%
+  # Keep only unique individuals
+  distinct(id) %>%
+  # Keep only vector of IDs
+  extract2("id")
+
+# Remove individuals whose AKI did not resolve at hospital discharge
+dat_spine %<>% filter(!(id %in% vec_ongoing_aki))
+
+# Number of individuals
+n_distinct(dat_spine[["id"]]) # n = 7,729
 
 ## Kidney function at end of hospitalisation of 60 mL/min/1.73m2 or higher
 dat_discharge_egfr <- dat_scr %>%
@@ -232,13 +286,13 @@ dat_spine %<>%
   filter(!is.na(egfr))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 9,705
+n_distinct(dat_spine[["id"]]) # n = 7,199
 
 # Join kidney function to spine data
 dat_spine %<>% filter(egfr >= 60)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 6,303
+n_distinct(dat_spine[["id"]]) # n = 4,904
 
 # 4. Finalise data ----
 # Clean up data and calculate last variables
