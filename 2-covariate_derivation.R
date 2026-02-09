@@ -1,7 +1,7 @@
 #----------------------------------------------------------#
 # Predicting outcomes after AKI using multistate models
 # Code for covariate derivation
-# Roemer J. Janse - Last updated on 2025-12-22
+# Roemer J. Janse - Last updated on 2026-01-22
 #----------------------------------------------------------#
 
 # 0. Set-up ----
@@ -19,7 +19,7 @@ pacman::p_load("dplyr",          # Data wrangling
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
 # Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/17092025/dataframes/"
+path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
 
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
@@ -188,7 +188,7 @@ vec_hyp <- unique(c(vec_diag, vec_med))
 # Remove other vectors
 rm(vec_diag, vec_med)
 
-## 2.4. Coronary artery/heart disease ----
+## 2.4. Baseline coronary artery/heart disease ----
 # ICD-10 Codes: I20; I21; I22; I23; I24; I25
 # Procedures: Coronary artery bypass grafting or percutaneous coronary Intervention
 
@@ -198,6 +198,7 @@ vec_cad <- dat_spine %>%
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
   filter(code %in% c("ICD10_CHD", 
+                     "ICD10_CHD_other", 
                      "Procedure_surgery_cardiothoracic_CABG",
                      "Procedure_angiogram_PCI") &
          code_dt <= discharge_dt) %>%
@@ -215,7 +216,8 @@ vec_cbvd <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_CVD"
+  filter(code %in% c("ICD10_CVD",
+                     "ICD10_CVD_sequelae"
                      ) &
            code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
@@ -450,11 +452,7 @@ vec_ntd <- dat_spine %>%
 # Calculate LOS immediately in spine data
 dat_spine %<>% mutate(los = as.numeric(discharge_dt - admission_dt))
 
-## 4.2. ICU admission ----
-
-## 4.3. Primary reason for admission ----
-
-## 4.4. Cardiothoracic surgery ----
+## 4.2. Cardiothoracic surgery ----
 # Individuals with cardiothoracic surgery
 vec_cts <- dat_spine %>%
   # Join diagnostic codes
@@ -468,7 +466,7 @@ vec_cts <- dat_spine %>%
   # Reduce to vector
   extract2("id")
 
-## 4.5. Non-cardiothoracic surgery ----
+## 4.3. Non-cardiothoracic surgery ----
 # Individuals with non-cardiothoracic surgery
 vec_ncts <- dat_spine %>%
   # Join diagnostic codes
@@ -481,7 +479,7 @@ vec_ncts <- dat_spine %>%
   # Reduce to vector
   extract2("id")
 
-## 4.6. Resuscitation ----
+## 4.4. Resuscitation ----
 # Individuals with resuscitation
 vec_resc <- dat_spine %>%
   # Join diagnostic codes
@@ -509,6 +507,9 @@ for(i in vec_data){
     # Rename indicator to vector
     set_colnames(c(colnames(.)[1:length(colnames(.)) - 1], i))
 }
+
+# Remove all vectors
+rm(list = ls()[str_detect(ls(), "vec_")])
 
 # Rename and re-order columns
 dat_spine %<>%

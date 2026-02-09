@@ -1,7 +1,7 @@
 #----------------------------------------------------------#
 # Predicting outcomes after AKI using multistate models
 # Code for cohort derivation
-# Roemer J. Janse - Last updated on 2025-10-30
+# Roemer J. Janse - Last updated on 2026-01-22
 #----------------------------------------------------------#
 
 # 0. Set-up ----
@@ -19,7 +19,7 @@ pacman::p_load("dplyr",          # Data wrangling
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
 # Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/14012026/"
+path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/"
 
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
@@ -106,11 +106,31 @@ dat_scr <- cleaned_dataset %>%
 save(dat_scr,
      file = paste0(path, "dataframes/creats.Rdata"))
 
+# Load death data
+load(paste0(str_replace(path, "dataframes/", ""), "cleaned_DV_Death_or_last_contact_dates.Rdata"))
+
+# Clean data
+dat_death <- cleaned_dataset %>%
+  # Set all column names to lower
+  set_colnames(tolower(colnames(.))) %>%
+  # Remove remaining grouping structure
+  ungroup() %>%
+  # Change dates from POSIXct to Date format
+  mutate(across(death_date:last_contact_date, as.Date)) %>%
+  # Change names
+  rename(death_dt = death_date,
+         censor_dt = last_contact_date)
+
+# Save data
+save(dat_death,
+     file = paste0(path, "death.Rdata"))
+
 # Load data frames
 load(paste0(path, "dataframes/hosps.Rdata"))
 load(paste0(path, "dataframes/diagnoses_procedures.Rdata"))
 load(paste0(path, "dataframes/laboratory.Rdata"))
 load(paste0(path, "dataframes/creats.Rdata"))
+load(paste0(path, "dataframes/death.Rdata"))
 
 # 2. Cohort spine ----
 # We create the cohort spine based on AKI hospitalisation
@@ -138,10 +158,6 @@ dat_spine <- (dat_ongoing_aki <- dat_hosp %>%
   # Keep only relevant variables
   select(id, sex, dob, pre_aki_creat, admission_dt, discharge_dt, dialysis, stage)
          
-# Determine max stage (separately as sometimes, two AKIs occur during hospitalisation and we want
-# to take the max stage of any AKI during hospitalisation
-
-
 # Number of individuals
 n_distinct(dat_spine[["id"]]) # n = 51,058
 
@@ -169,6 +185,36 @@ dat_spine %<>%
 
 # Number of individuals
 n_distinct(dat_spine[["id"]]) # n = 12,628
+
+# Determine max stage (separately as sometimes, two AKIs occur during hospitalisation and we want
+# to take the max stage of any AKI during hospitalisation
+# Data frame with all AKIs per individual
+dat_max_stage <- dat_spine %>%
+  # Keep only relevant information
+  select(id, discharge_dt) %>%
+  # Join all AKIs
+  left_join(dat_hosp %>%
+              # Keep only AKIs
+              filter(aki_episode_incl365d >= 1) %>%
+              # Keep only relevant information
+              select(id, date, aki_episode_incl365d, stage),
+            # Join by ID
+            "id") %>%
+  # Keep only AKIs prior to discharge
+  filter(as.Date(date) <= discharge_dt) %>%
+  # Arrange for grouping
+  arrange(id) %>%
+  # Group per individual
+  group_by(id) %>%
+  # Get max stage
+  summarise(stage = max(stage))
+
+# Add max stage to spine
+dat_spine %<>%
+  # Drop previous stage indicator
+  select(-stage) %>%
+  # Add stage indicator
+  left_join(dat_max_stage, "id")
 
 # 3. Apply other inclusion criteria ----
 # Age of 18 years and older
@@ -293,6 +339,41 @@ dat_spine %<>% filter(egfr >= 60)
 
 # Number of individuals
 n_distinct(dat_spine[["id"]]) # n = 4,904
+
+## Censor individuals who died at hospital discharge
+dat_spine %<>% 
+  # Join death data
+  left_join(dat_death %>% 
+              # Keep only relevant variables
+              select(id, death_dt),
+            # Join by ID
+            "id") %>%
+  # Drop individuals who died at discharge
+  filter(is.na(death_dt) | death_dt > discharge_dt) %>%
+  # Drop death date
+  select(-death_dt)
+
+# Number of individuals
+n_distinct(dat_spine[["id"]]) # n = 4,383
+
+## Censor individuals who were censored prior to hospital discharge
+dat_spine %<>% 
+  # Join death data
+  left_join(dat_death %>% 
+              # Keep only relevant variables
+              select(id, censor_dt),
+            # Join by ID
+            "id") %>%
+  # Drop individuals who died at discharge
+  filter(is.na(censor_dt) | censor_dt > discharge_dt) %>%
+  # Drop death date
+  select(-censor_dt)
+
+# Number of individuals
+n_distinct(dat_spine[["id"]]) # n = 4,049
+
+# Remove vectors
+rm(vec_ktx, vec_main_dial, vec_ongoing_aki)
 
 # 4. Finalise data ----
 # Clean up data and calculate last variables
