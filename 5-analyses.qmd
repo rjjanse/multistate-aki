@@ -1,0 +1,91 @@
+---
+format: docx
+editor: source
+---
+
+# 0. Set-up
+```{r set-up}
+#----------------------------------------------------------#
+# Predicting outcomes after AKI using multistate models
+# Code for final analyses
+# Roemer J. Janse - Last updated on 2026-02-19
+#----------------------------------------------------------#
+
+# Load packages
+pacman::p_load("dplyr",          # Data wrangling
+               "magrittr",       # Efficient pipelines
+               "tidyr",          # Data pivoting
+               "purrr",          # Functional programming
+               "here",           # Local paths
+               "tableone",       # Baseline characteristics table
+               "ggplot2",        # Data visualisation
+               "patchwork",      # Patching plots together
+               "conflicted"      # Resolve function conflicts
+)
+
+# Resolve function conflicts
+conflicts_prefer(dplyr::filter) # Between stats and dplyr
+
+# Set data path
+path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
+
+# Load functions
+walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
+
+# Load spine data
+loadr("outcome_derivation.Rdata")
+
+# Load model
+loadr("mstate_fit.Rdata")
+
+# Load predictions
+loadr("predictions.Rdata")
+
+```
+
+# 1. Baseline characteristics ----
+```{r baseline characteristics}
+# List of variables for table 1
+vec_var <- c(# Demographics
+             "age", "female", "lab_bmi", "bmi_missing",
+             # Index AKI
+             "pre_aki_egfr", "stage", "egfr",
+             # Hospitalisation characteristics
+             "los", "ihe_cts", "ihe_ncts", "ihe_resc",
+             # Comorbidities
+             "com_arr", "com_aid", "com_cad", "com_cbvd", "com_copd", "com_diab", "com_hf", "com_hltx", "com_hyp", "com_liver", "com_mal", "com_pad",
+             "com_pckd",
+             # Medication
+             "med_aht", "med_ata", "med_gla", "med_ims", "med_lla", "med_ntd",
+             # Laboratory values
+             "lab_hb", "hb_missing", "lab_k", "k_missing", "lab_n", "n_missing", "lab_urea", "urea_missing", "lab_crp", "crp_missing", "lab_gluc_nf",
+             "gluc_nf_missing", "lab_gluc_f", "gluc_f_missing", "lab_hba1c", "hba1c_missing", "lab_uacr", "uacr_missing")
+             
+# Continuous variables
+vec_cnt <- c("age", "lab_bmi", "pre_aki_egfr", "egfr", "los", "lab_hb", "lab_k", "lab_n", "lab_urea", "lab_crp", "lab_gluc_nf", "lab_gluc_f", 
+             "lab_hba1c", "lab_uacr")
+
+# Non-normally distributed variables
+vec_nnormal <- c("age", "lab_bmi", "pre_aki_egfr", "egfr", "los", "lab_hb", "lab_n", "lab_urea", "lab_crp", "lab_gluc_nf", "lab_gluc_f", "lab_hba1c",
+                 "lab_uacr")
+
+# Categorical variables
+vec_cat <- vec_var[!(vec_var %in% vec_cnt)]
+
+# Create table
+CreateTableOne(vec_var,
+               data = dat_spine,
+               factorVars = vec_cat) %>%
+  # Print table to matrix
+  print(printToggle = FALSE,
+        contDigits = 1,
+        noSpaces = TRUE,
+        nonnormal = vec_nnormal) %>%
+  # Set type to matrix
+  as.matrix()
+  
+
+
+
+
+```

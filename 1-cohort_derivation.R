@@ -1,7 +1,7 @@
 #----------------------------------------------------------#
 # Predicting outcomes after AKI using multistate models
 # Code for cohort derivation
-# Roemer J. Janse - Last updated on 2026-01-22
+# Roemer J. Janse - Last updated on 2026-02-24
 #----------------------------------------------------------#
 
 # 0. Set-up ----
@@ -48,25 +48,24 @@ dat_hosp <- cleaned_dataset %>%
   rename(admission_dt = admission_date,
          discharge_dt = discharge_date,
          dialysis = any_dialysis,
-         stage = aki_stage_incl365d,
-         pre_aki_creat = creatinine_bl_umol_l) 
+         stage = aki_stage_incl365d) 
 
 # Save clean hospitalisation data
 save(dat_hosp,
      file = paste0(path, "dataframes/hosps.Rdata"))
 
 # Load procedure data
-load(paste0(path, "cleaned_DV_ICD10codes_procedures.Rdata"))
+load(paste0(path, "cleaned_DV_ICD10codes_procedures_freetext_comorbidities.Rdata"))
 
 # Clean procedure and diagnosis data
 dat_proc <- cleaned_dataset %>%
   # Set all column names to lower case
   set_colnames(tolower(colnames(.))) %>%
-  # Drop redundant column
-  select(-result) %>%
   # Set POSIXct date to Date object
-  mutate(code_dt = as.Date(date_start),
-         .keep = "unused")
+  mutate(code_dt = as.Date(date),
+         .keep = "unused") %>%
+  # Set code to lowercase
+  mutate(code = tolower(code))
 
 # Save cleaned data
 save(dat_proc,
@@ -95,19 +94,21 @@ dat_scr <- cleaned_dataset %>%
   # Set all column names to lower case
   set_colnames(tolower(colnames(.))) %>%
   # Keep only relevant columns
-  select(id, date, creatinine_bl_umol_l) %>%
+  select(id, date, creatinine_bl_umol_l, during_hospitalisation, specialty_hos) %>%
   # Set POSIXct date to Date object
   mutate(lab_dt = as.Date(date),
          .keep = "unused") %>%
   # Rename creatinine
-  rename(creat = creatinine_bl_umol_l)
+  rename(creat = creatinine_bl_umol_l,
+         ih = during_hospitalisation,
+         dep = specialty_hos)
 
 # Save cleaned data
 save(dat_scr,
      file = paste0(path, "dataframes/creats.Rdata"))
 
 # Load death data
-load(paste0(str_replace(path, "dataframes/", ""), "cleaned_DV_Death_or_last_contact_dates.Rdata"))
+load(paste0(path, "cleaned_DV_Death_or_last_contact_dates.Rdata"))
 
 # Clean data
 dat_death <- cleaned_dataset %>%
@@ -156,7 +157,7 @@ dat_spine <- (dat_ongoing_aki <- dat_hosp %>%
   # Remove grouping structure
   ungroup() %>%
   # Keep only relevant variables
-  select(id, sex, dob, pre_aki_creat, admission_dt, discharge_dt, dialysis, stage)
+  select(id, sex, dob, admission_dt, discharge_dt, stage)
          
 # Number of individuals
 n_distinct(dat_spine[["id"]]) # n = 51,058
@@ -177,14 +178,39 @@ dat_spine %<>%
          # Length of stay
          los = as.numeric(discharge_dt - admission_dt),
          # Age at discharge
-         age = round(as.numeric(discharge_dt - dob) / 365.25),
-         # eGFR pre-AKI
-         pre_aki_egfr = ckd_epi(pre_aki_creat, female, age)) %>%
+         age = round(as.numeric(discharge_dt - dob) / 365.25)) %>%
   # Drop sex and reorder columns
-  select(id, age, female, pre_aki_egfr, admission_dt, discharge_dt, stage, dialysis)
+  select(id, dob, age, female, admission_dt, discharge_dt, stage)
 
 # Number of individuals
 n_distinct(dat_spine[["id"]]) # n = 12,628
+
+# Determine pre-AKI eGFR
+dat_pae <- dat_scr %>%
+  # Drop in-hospital creats
+  filter(ih == 0) %>%
+  # Join admission date
+  left_join(dat_spine %>%
+              # Keep only relevant variables
+              select(id, admission_dt, female, dob),
+            # Join by ID
+            "id") %>%
+  # Keep only creatinines in relevant time frame
+  filter(lab_dt >= admission_dt - 365 & lab_dt <= admission_dt - 7) %>%
+  # Calculate eGFR
+  mutate(# Age at creatinine measurement
+         age = round(as.numeric(lab_dt - dob) / 365.25),
+         # eGFR
+         pre_aki_egfr = ckd_epi(creat, female, age)) %>%
+  # Arrange for grouping
+  arrange(id) %>%
+  # Group per individual
+  group_by(id) %>%
+  # Get median eGFR per individual
+  summarise(pre_aki_egfr = median(pre_aki_egfr))
+
+# Join to spine data
+dat_spine %<>% left_join(dat_pae, "id")
 
 # Determine max stage (separately as sometimes, two AKIs occur during hospitalisation and we want
 # to take the max stage of any AKI during hospitalisation
@@ -216,18 +242,42 @@ dat_spine %<>%
   # Add stage indicator
   left_join(dat_max_stage, "id")
 
+# Individuals with previous AKI based on ICD-10 codes
+vec_paki <- dat_spine %>%
+  # Join diagnostic codes
+  left_join(dat_proc, "id") %>%
+  # Keep only hypertension codes prior to admission
+  filter(code %in% c("aki_icd10_dbc_date",
+                     "aki_icd10_diagnosis_date",
+                     "aki_diagn_descr_date") &
+         code_dt <= admission_dt) %>%
+  # Keep only one ID per individual
+  distinct(id) %>%
+  # Reduce to vector
+  extract2("id")
+
+# Exclude individuals with a previous AKI based on ICD-10
+dat_spine %<>% filter(!(id %in% vec_paki))
+
+# Number of individuals
+n_distinct(dat_spine[["id"]]) # n = 12,534
+
 # 3. Apply other inclusion criteria ----
 # Age of 18 years and older
 dat_spine %<>% filter(age >= 18)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 10,248
+n_distinct(dat_spine[["id"]]) # n = 10,165
 
 ## No previous maintenance dialysis
 # Select individuals with maintenance dialysis
 vec_main_dial <- dat_proc %>%
   # Keep only maintenance dialysis 
-  filter(code %in% c("ICD10_Chronic_dialysis", "Procedure_Chronic_dialysis")) %>%
+  filter(code %in% c("chronic_dialysis_procedure", 
+                     "chronic_dialysis_icd10_dbc_date",
+                     "chronic_dialysis_icd10_diagnosis_date",
+                     "dialysis_shunt_procedure",
+                     "chronic_dialysis_diagn_descr_date")) %>%
   # Add AKI admission date
   left_join(dat_spine %>%
               # Keep only ID and admission date
@@ -244,13 +294,18 @@ vec_main_dial <- dat_proc %>%
 dat_spine %<>% filter(!(id %in% vec_main_dial))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 9,731
+n_distinct(dat_spine[["id"]]) # n = 9,643
 
 ## No previous kidney transplantation
 # Select individuals with kidney transplantation
 vec_ktx <- dat_proc %>%
   # Keep only maintenance dialysis 
-  filter(code %in% c("ICD10_KTx", "Procedure_surgery_KTx", "Procedure_KTx_followup")) %>%
+  filter(code %in% c("surgery_ktx_procedure", 
+                     "ktx_icd10_dbc_date",
+                     "ktx_icd10_diagnosis_date",
+                     "ktx_diagn_descr_date",
+                     "ktx_followup_procedure",
+                     "ktx_workup_procedure")) %>%
   # Add AKI admission date
   left_join(dat_spine %>%
               # Keep only ID and admission date
@@ -267,7 +322,7 @@ vec_ktx <- dat_proc %>%
 dat_spine %<>% filter(!(id %in% vec_ktx))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 9,350
+n_distinct(dat_spine[["id"]]) # n = 9,251
 
 ## Ongoing AKI
 # Determine ongoing AKIs
@@ -295,7 +350,7 @@ vec_ongoing_aki <- dat_ongoing_aki %>%
 dat_spine %<>% filter(!(id %in% vec_ongoing_aki))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 7,729
+n_distinct(dat_spine[["id"]]) # n = 7,665
 
 ## Kidney function at end of hospitalisation of 60 mL/min/1.73m2 or higher
 dat_discharge_egfr <- dat_scr %>%
@@ -332,13 +387,13 @@ dat_spine %<>%
   filter(!is.na(egfr))
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 7,199
+n_distinct(dat_spine[["id"]]) # n = 7,138
 
 # Join kidney function to spine data
 dat_spine %<>% filter(egfr >= 60)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 4,904
+n_distinct(dat_spine[["id"]]) # n = 4,874
 
 ## Censor individuals who died at hospital discharge
 dat_spine %<>% 
@@ -354,7 +409,7 @@ dat_spine %<>%
   select(-death_dt)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 4,383
+n_distinct(dat_spine[["id"]]) # n = 4,356
 
 ## Censor individuals who were censored prior to hospital discharge
 dat_spine %<>% 
@@ -370,7 +425,7 @@ dat_spine %<>%
   select(-censor_dt)
 
 # Number of individuals
-n_distinct(dat_spine[["id"]]) # n = 4,049
+n_distinct(dat_spine[["id"]]) # n = 4,023
 
 # Remove vectors
 rm(vec_ktx, vec_main_dial, vec_ongoing_aki)
@@ -382,7 +437,9 @@ dat_spine <- dat_spine %>%
   mutate(# Relative eGFR change (negative sign equals increase)
          egfr_change = (pre_aki_egfr - egfr) / pre_aki_egfr,
          # Length of hospital stay
-         los = as.numeric(discharge_dt - admission_dt))
+         los = as.numeric(discharge_dt - admission_dt),
+         # Missing pre-AKI-eGFR
+         missing_pre_aki_egfr = if_else(is.na(pre_aki_egfr), 1, 0))
 
 # Save data
 save(dat_spine,

@@ -1,7 +1,7 @@
 #----------------------------------------------------------#
 # Predicting outcomes after AKI using multistate models
 # Code for covariate derivation
-# Roemer J. Janse - Last updated on 2026-01-22
+# Roemer J. Janse - Last updated on 2026-02-18
 #----------------------------------------------------------#
 
 # 0. Set-up ----
@@ -18,8 +18,10 @@ pacman::p_load("dplyr",          # Data wrangling
 # Resolve function conflicts
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
-# Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
+# Set data path, based on OS
+if(.Platform[["OS.type"]] == "unix"){
+  path <- "/Users/rjanse5/Networkshares/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
+} else path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
 
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
@@ -68,7 +70,9 @@ vec_diag <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only diabetes diagnoses prior to discharge date
-  filter(code == "ICD10_DM" &
+  filter(code %in% c("dm_icd10_diagnosis_date",
+                     "dm_diagn_descr_date",
+                     "dm_icd10_dbc_date") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -80,7 +84,9 @@ vec_med <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_med, "id") %>%
   # Keep only glucose lowering drugs that were an active prescription in the last year prior to discharge
-  filter(drug == "gluc_lowering_med" &
+  filter(drug %in% c("gluc_lowering_med",
+                     "glp1ra_med",
+                     "sglt2i_med") &
          stop_dt >= discharge_dt - 365 &
          stop_dt <= discharge_dt) %>%
   # Keep only one ID per individual
@@ -92,11 +98,12 @@ vec_med <- dat_spine %>%
 vec_hba1c <- dat_spine %>%
   # Join lab data
   left_join(dat_lab, "id") %>%
-  # Keep only HbA1c >= 6.5% within three months prior to discharge date
-  filter(code == "HbA1c_bl_procent_lab" &
+  # Keep only HbA1c >= 48 within three months prior to discharge date
+  # HbA1c % measurements were only taken up until 2010-03-31, so not applicable here
+  filter(code == "HbA1c_bl_mmol_mol_lab" &
          lab_dt >= discharge_dt - 90 &
          lab_dt <= discharge_dt &
-         result >= 6.5) %>%
+         result >= 48) %>%
   # Keep only one ID per individual
   distinct(id) %>%
   # Reduce to vector
@@ -145,7 +152,10 @@ vec_hf <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only diabetes diagnoses prior to discharge date
-  filter(code %in% c("ICD10_HF", "Procedure_surgery_cardiothoracic_artificial_heart") &
+  filter(code %in% c("hf_icd10_dbc_date",
+                     "hf_diagn_descr_date",
+                     "hf_icd10_diagnosis_date",
+                     "surgery_cardiothoracic_artificial_heart_procedure") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -162,7 +172,11 @@ vec_diag <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes in the year prior to discharge
-  filter(code == "ICD10_HT" &
+  filter(code %in% c("ht_icd10_diagnosis_date",
+                     "ht_diagn_descr_date",
+                     "ht_syst_date",
+                     "ht_dias_date",
+                     "ht_icd10_dbc_date") &
          code_dt >= discharge_dt - 365 &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
@@ -197,10 +211,14 @@ vec_cad <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_CHD", 
-                     "ICD10_CHD_other", 
-                     "Procedure_surgery_cardiothoracic_CABG",
-                     "Procedure_angiogram_PCI") &
+  filter(code %in% c("chd_other_icd10_dbc_date",
+                     "chd_other_icd10_diagnosis_date",
+                     "chd_diagn_descr_date",
+                     "chd_icd10_dbc_date",
+                     "chd_icd10_diagnosis_date",
+                     "surgery_cardiothoracic_cabg_procedure",
+                     "cabg_diagn_descr_date",
+                     "angiogram_pci_procedure") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -216,8 +234,13 @@ vec_cbvd <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_CVD",
-                     "ICD10_CVD_sequelae"
+  filter(code %in% c("cvd_icd10_diagnosis_date", 
+                     "cvd_diagn_descr_date",
+                     "cvd_icd10_dbc_date",
+                     "cvd_sequelae_diagn_descr_date",    
+                     "cvd_sequelae_icd10_dbc_date",
+                     "cvd_sequelae_icd10_diagnosis_date",
+                     "comorb_cerebrovascular_disease_procedure"
                      ) &
            code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
@@ -233,7 +256,9 @@ vec_copd <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code == "ICD10_COPD" &
+  filter(code %in% c("copd_icd10_dbc_date",
+                     "copd_icd10_diagnosis_date",
+                     "copd_diagn_descr_date") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -248,7 +273,9 @@ vec_liver <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code == "ICD10_Liverdisease" &
+  filter(code %in% c("liverdisease_diagn_descr_date",
+                     "liverdisease_icd10_diagnosis_date",
+                     "liverdisease_icd10_dbc_date") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -264,8 +291,11 @@ vec_mal <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_Malignancy",
-                     "Procedure_BMT") &
+  filter(code %in% c("malignancy_icd10_dbc_date",
+                     "malignancy_icd10_diagnosis_date",
+                     "malignancy_diagn_descr_date",
+                     "comorb_malignancy_procedure",
+                     "bmt_procedure") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -281,8 +311,10 @@ vec_arr <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_Arrhythmia",
-                     "Procedure_arrhythmia") &
+  filter(code %in% c("arrhythmia_procedure",
+                     "arrhythmia_icd10_diagnosis_date",
+                     "arrhythmia_diagn_descr_date",
+                     "arrhythmia_icd10_dbc_date") &
            code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -298,7 +330,10 @@ vec_pad <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_PAD") &
+  filter(code %in% c("pad_icd10_dbc_date",
+                     "pad_icd10_diagnosis_date",
+                     "pad_diagn_descr_date",
+                     "comorb_pad_procedure") &
            code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -313,7 +348,9 @@ vec_aid <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code == "ICD10_Autoimmunedisease" &
+  filter(code %in% c("autoimmunedisease_icd10_dbc_date",
+                     "autoimmunedisease_icd10_diagnosis_date",
+                     "autoimmunedisease_diagn_descr_date") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -328,7 +365,9 @@ vec_pckd <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code == "ICD10_Hereditary_congenital_and_polycystic_kidneydisease" &
+  filter(code %in% c("hereditary_congenital_and_polycystic_kidneydisease_icd10_diagnosis_date",
+                     "hereditary_congenital_and_polycystic_kidneydisease_icd10_dbc_date",    
+                     "hereditary_kidneydisease_diagn_descr_date") &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
@@ -344,22 +383,11 @@ vec_hltx <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only hypertension codes prior to discharge
-  filter(code %in% c("ICD10_Heart_or_LungTx", 
-                     "Procedure_surgery_cardiothoracic_Heart_or_LungTx") &
+  filter(code %in% c("surgery_cardiothoracic_heart_or_lungtx_procedure",
+                     "heart_or_lungtx_diagn_descr_date",  
+                     "heart_or_lungtx_icd10_dbc_date",
+                     "heart_or_lungtx_icd10_diagnosis_date") &
          code_dt <= discharge_dt) %>%
-  # Keep only one ID per individual
-  distinct(id) %>%
-  # Reduce to vector
-  extract2("id")
-
-## 2.14. Previous AKI ----
-# Individuals with previous AKI based on ICD-10 codes
-vec_paki <- dat_spine %>%
-  # Join diagnostic codes
-  left_join(dat_proc, "id") %>%
-  # Keep only hypertension codes prior to admission
-  filter(code == "ICD10_AKI" &
-         code_dt <= admission_dt) %>%
   # Keep only one ID per individual
   distinct(id) %>%
   # Reduce to vector
@@ -485,8 +513,10 @@ vec_resc <- dat_spine %>%
   # Join diagnostic codes
   left_join(dat_proc, "id") %>%
   # Keep only codes during admission
-  filter(code %in% c("ICD10_Resuscitation", 
-                     "Procedure_Resuscitation") &
+  filter(code %in% c("resuscitation_diagn_descr_date", 
+                     "resuscitation_procedure", 
+                     "resuscitation_icd10_dbc_date",    
+                     "resuscitation_icd10_diagnosis_date") &
          code_dt >= admission_dt &
          code_dt <= discharge_dt) %>%
   # Keep only one ID per individual
@@ -494,7 +524,85 @@ vec_resc <- dat_spine %>%
   # Reduce to vector
   extract2("id")
 
-# 5. Combine all data ----
+# 5. Laboratory data (for baseline characteristics) ----
+# Derive all lab information
+dat_labs <- dat_lab %>%
+  # Keep only relevant tests
+  filter(code %in% c("HbA1c_bl_mmol_mol_lab", 
+                     "Glucose_f_bl_mmol_L_lab",
+                     "Glucose_nf_bl_mmol_L_lab", 
+                     "Measurement_Weight_kg",
+                     "Measurement_Length_cm",
+                     "Hb_bl_mmol_L_lab",
+                     "CRP_bl_mg_L_lab",
+                     "Potassium_bl_mmol_L_lab",
+                     "Sodium_bl_mmol_L_lab",
+                     "Urea_bl_mmol_L_lab",
+                     "Albuminuria_u_mg_mmol_cr_lab",
+                     "uACR_categorie_u_lab")) %>%
+  # Keep only individuals in dat_spine
+  filter(id %in% dat_spine[["id"]]) %>%
+  # Arrange for grouping
+  arrange(id, lab_dt, code) %>%
+  # Group lab tests on day-level per individual
+  group_by(id, lab_dt, code) %>%
+  # Take mean of results
+  mutate(result = mean(result, 
+                       na.rm = TRUE)) %>%
+  # Keep one row per item
+  slice(1L) %>%
+  # Remove grouping structure
+  ungroup() %>%
+  # Pivot data to wide format
+  pivot_wider(id_cols = c(id, lab_dt),
+              names_from = code,
+              values_from = result) %>%
+  # Rename columns                                 # Units
+  rename(hb = Hb_bl_mmol_L_lab,                    # mmol/L
+         k = Potassium_bl_mmol_L_lab,              # mmol/L
+         n = Sodium_bl_mmol_L_lab,                 # mmol/L
+         urea = Urea_bl_mmol_L_lab,                # mmol/L
+         crp = CRP_bl_mg_L_lab,                    # mg/L
+         gluc_nf = Glucose_nf_bl_mmol_L_lab,       # mmol/L
+         length = Measurement_Length_cm,           # cm
+         weight = Measurement_Weight_kg,           # kg
+         hba1c = HbA1c_bl_mmol_mol_lab,            # mmol/mol
+         gluc_f = Glucose_f_bl_mmol_L_lab,         # mmol/L
+         uacr = Albuminuria_u_mg_mmol_cr_lab) %>%  # mg/mmol
+  # Calculate BMI
+  mutate(bmi = weight / (length / 100) ^ 2, .keep = "unused") %>%
+  # Add admission and discharge date of each individual
+  left_join(dat_spine %>%
+              # Keep relevant variables
+              select(id, admission_dt, discharge_dt),
+            # Join by ID
+            "id") %>%
+  # Keep only data available within specified time frames
+  mutate(# During hospitalisation
+         across(c(crp, hb, k, urea), \(x) x = if_else(lab_dt >= admission_dt & lab_dt <= discharge_dt, x, NA)),
+         # Prior to hospitalisation
+         across(c(gluc_nf, gluc_f, n, uacr), \(x) x = if_else(lab_dt >= admission_dt - 90 & lab_dt < admission_dt, x, NA)),
+         # Prior to discharge
+         across(c(hba1c, bmi), \(x) x = if_else(lab_dt >= discharge_dt - 90 & lab_dt <= discharge_dt, x, NA))) %>%
+  # Arrange for grouping
+  arrange(id) %>%
+  # Group per individual
+  group_by(id) %>%
+  # Calculate mean value for all lab values
+  mutate(across(hb:bmi, \(x) x = mean(x, na.rm = TRUE))) %>%
+  # Keep one row per individual
+  slice(1L) %>%
+  # Remove grouping structure
+  ungroup() %>%
+  # Set NaN to NA and create missing indicators
+  mutate(# NaN to NA
+         across(hb:bmi, \(x) x = if_else(is.na(x), NA, x)),
+         # Missing indicators
+         across(hb:bmi, \(x) x = if_else(is.na(x), 1, 0), .names = "{col}_missing")) %>%
+  # Drop left-over columns
+  select(-c(lab_dt, admission_dt, discharge_dt))
+
+# 6. Combine all data ----
 # Vector with names of all data vectors
 vec_data <- ls()[str_detect(ls(), "vec_")]
 
@@ -511,36 +619,47 @@ for(i in vec_data){
 # Remove all vectors
 rm(list = ls()[str_detect(ls(), "vec_")])
 
-# Rename and re-order columns
+# Add lab, rename and re-order columns
 dat_spine %<>%
+  # Add lab
+  left_join(dat_labs, "id") %>%
   # Renaming
-  rename(med_aht = vec_aht,       # Anti-hypertensives    
-         com_aid = vec_aid,       # Autoimmune disease    
+  rename(med_aht = vec_aht,       # Anti-hypertensives    ### Not a predictor
+         com_aid = vec_aid,       # Autoimmune disease    ### Not a predictor
          com_arr = vec_arr,       # Arrhythmias
-         med_ata = vec_ata,       # Anti-thrombotic agents   
+         med_ata = vec_ata,       # Anti-thrombotic agents   ### Not a predictor
          com_cad = vec_cad,       # Cororary artery disease    
          com_cbvd = vec_cbvd,     # Cerebrovascular disease      
          com_copd = vec_copd,     # COPD      
          ihe_cts = vec_cts,       # Cardiothoracic surgery (in-hospital event) 
          com_diab = vec_diab,     # Diabetes      
-         med_gla = vec_gla,       # Glucose-lowering agents    
+         med_gla = vec_gla,       # Glucose-lowering agents    ### Not a predictor
          com_hf = vec_hf,         # Heart failure  
-         com_hltx = vec_hltx,     # Heart/lung Tx      
-         com_hyp = vec_hyp,       # Hypertension    
+         com_hltx = vec_hltx,     # Heart/lung Tx              ### Not a predictor
+         com_hyp = vec_hyp,       # Hypertension                  
          med_ims = vec_ims,       # Immunosuppressive medication    
-         com_liver = vec_liver,   # Liver disease        
+         com_liver = vec_liver,   # Liver disease              ### Not a predictor   
          med_lla = vec_lla,       # Lipid-lowering agents    
          com_mal = vec_mal,       # Malignancy    
          ihe_ncts = vec_ncts,     # Non-cardiothoracic surgery (in-hospital event)      
          med_ntd = vec_ntd,       # Nephrotoxic drugs    
-         com_pad = vec_pad,       # Peripheral artery disease    
-         com_paki = vec_paki,     # Previous AKI      
-         com_pckd = vec_pckd,     # Polycystic kidney disease      
-         ihe_resc = vec_resc      # Resuscitation (in-hospital event)    
-  ) %>%# 
+         com_pad = vec_pad,       # Peripheral artery disease  ### Not a predictor
+         com_pckd = vec_pckd,     # Polycystic kidney disease  ### Not a predictor 
+         ihe_resc = vec_resc,     # Resuscitation (in-hospital event)    ### Not a predictor
+         lab_hb = hb,             # Haemoglobin
+         lab_k = k,               # Potassium
+         lab_n = n,               # Sodium
+         lab_urea = urea,         # Urea
+         lab_crp = crp,           # CRP
+         lab_gluc_nf = gluc_nf,   # Glucose (non-fasting)
+         lab_hba1c = hba1c,       # HbA1c
+         lab_gluc_f = gluc_f,     # Glucose (fasting)
+         lab_uacr = uacr,         # uACR
+         lab_bmi = bmi            # BMI
+  ) %>%
   # Change order
   relocate(com_arr, com_aid, com_cad, com_cbvd, com_copd, com_diab, com_hf, com_hltx, com_hyp, com_liver, com_mal, com_pad,
-           com_paki, com_pckd, med_aht, med_ata, med_gla, med_ims, med_lla, med_ntd, ihe_cts, ihe_ncts, ihe_resc,
+           com_pckd, med_aht, med_ata, med_gla, med_ims, med_lla, med_ntd, ihe_cts, ihe_ncts, ihe_resc, lab_hb:lab_bmi,
            .after = los)
 
 # Save data
