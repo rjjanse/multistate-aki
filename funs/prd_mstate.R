@@ -1,5 +1,5 @@
 # Create function to calculate multistate predicted risks per individual 
-prd_mstate <- function(.data, predictors, transition_matrix){
+prd_mstate <- function(.data, predictors, transition_matrix, t = 0, state = 1){
   # Select all predictor columns
   dat_new <- select(.data, id, all_of(predictors))
   
@@ -38,9 +38,15 @@ prd_mstate <- function(.data, predictors, transition_matrix){
   
   # Total studynrs
   tot <- length(ids)
+
+  # Elapsed time
+  time_elapsed <- 0
   
   # Get individual predictions
   all_probs <- do.call("rbind", lapply(1:tot, function(x){
+    # Iteration start time
+    start_time_iter <- Sys.time()
+    
     # Get ID
     id_iteration = ids[[x]]
     
@@ -52,15 +58,24 @@ prd_mstate <- function(.data, predictors, transition_matrix){
     
     # Get individual probabilities for each timepoint
     probs <- probtrans(dat_fit, 
-                       predt = 0, 
+                       predt = t, 
                        method = "aalen", 
                        direction = "forward", 
-                       variance = FALSE)[[1]] %>%
+                       variance = FALSE)[[state]] %>%
       # Add studynr
       mutate(id = id_iteration)
     
+    # End time iteration
+    end_time_iter <- Sys.time()
+    
+    # Time elapsed (in seconds)
+    time_elapsed <- time_elapsed + as.numeric(end_time_iter - start_time_iter)
+
+    # Remaining time
+    remaining_time <- round((tot - x) * ((time_elapsed / x) / 60))
+    
     # Iteration counter
-    cat("\rIteration ", x, "/",tot, "       ")
+    cat("\rIteration", x, "/", tot , "with", remaining_time, "minutes remaining. Time elapsed:", round(time_elapsed / 60, 2), "minutes.     ")
     
     # Return probs
     return(probs)

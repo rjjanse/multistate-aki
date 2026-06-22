@@ -19,13 +19,13 @@ pacman::p_load("dplyr",          # Data wrangling
 # Resolve function conflicts
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
-# Set data path, based on OS
-if(.Platform[["OS.type"]] == "unix"){
-  path <- "/Users/rjanse5/Networkshares/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
-} else path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
-
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
+
+
+# Set data path
+path <- psp(unix = "/Users/rjanse5/Networkshares/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/",
+            windows = "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/")
 
 # Load spine data
 load(paste0(path, "covariate_derivation.Rdata"))
@@ -154,7 +154,8 @@ dat_spine %<>%
   # Add ttc data
   left_join(dat_ttc, "id") %>%
   # Create date and indicator from time to CKD
-  mutate(ckd_dt = as.Date(discharge_dt + ckd_tte),
+  mutate(ckd_tte = ceiling(ckd_tte),
+         ckd_dt = as.Date(discharge_dt + ckd_tte),
          ckd = if_else(is.na(ckd_tte), 0, 1)) 
 
 ## 1.3. Kidney failure ----
@@ -220,7 +221,7 @@ dat_ttk %<>%
                              kf == 1 & kf_dt == code_dt ~ "icd",
                              kf == 0 ~ NA),
          # Time to kidney fialure
-         kf_tte = as.numeric(kf_dt - discharge_dt)) %>%
+         kf_tte = ceiling(as.numeric(kf_dt - discharge_dt))) %>%
   # Drop redundant variables
   select(-c(discharge_dt, code, code_dt, creat_kf_dt, ttk_li, ttk_tm))
 
@@ -328,9 +329,10 @@ load(paste0(path, "death.Rdata"))
 dat_spine %<>% left_join(dat_death, "id")
 
 # 2. Finalise data ----
-## 2.1. Final computations ----
+## 2.1. Endpoint model ----
+### 2.1.1. Final computations ----
 # Finalise spine data
-dat_spine %<>%
+dat_spine_em <- dat_spine %>%
   # Adjust dates based on censoring, administrative censoring (2025-09-17) and 10-year final follow-up
   mutate(# Administrative censoring
          adm_cens_dt = as.Date("2025-09-17"),
@@ -348,21 +350,13 @@ dat_spine %<>%
          death = if_else(final_dt == death_dt, 1, 0, missing = 0),
          death_dt = if_else(death == 1, death_dt, final_dt),
          death_tte = as.numeric(death_dt - discharge_dt),
-         # AKI variables
-         aki = if_else(aki_dt == pmin(aki_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
-         aki_dt = if_else(aki == 1, aki_dt, final_dt),
-         aki_tte = as.numeric(aki_dt - discharge_dt),
-         aki_type = if_else(aki == 1, aki_type, NA),
-         # CKD variables
-         ckd = if_else(ckd_dt == pmin(ckd_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
-         ckd_dt = if_else(ckd == 1, ckd_dt, final_dt),
-         ckd_tte = as.numeric(ckd_dt - discharge_dt),
-         ckd_type = if_else(ckd == 1, ckd_type, NA),
          # Kidney failure variables
          kf = if_else(kf_dt == pmin(kf_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
          kf_dt = if_else(kf == 1, kf_dt, final_dt),
          kf_tte = as.numeric(kf_dt - discharge_dt),
          kf_type = if_else(kf == 1, kf_type, NA),
+         # If death occurs on same day as kidney failure, make that event occur one day earlier
+         kf_tte = if_else(death_tte == kf_tte & death == 1 & kf == 1, kf_tte - 1, kf_tte),
          # Acute CHD variables
          chd = if_else(chd_dt == pmin(chd_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
          chd_dt = if_else(chd == 1, chd_dt, final_dt),
@@ -378,18 +372,125 @@ dat_spine %<>%
          # MACCE
          macce = pmax(chd, cvd, hfhosp),
          macce_dt = if_else(macce == 1, pmin(chd_dt, cvd_dt, hfhosp_dt, na.rm = TRUE), final_dt),
-            # If diagnosis is at the same moment, put MACCE 1 day later. This is the case for 0 CKD, 6 MACCE, and 15 AKI patients
-         macce_dt = if_else(macce == 1 & 
-                              (
-                                (macce_dt == ckd_dt & ckd == 1) | 
-                                (macce_dt == kf_dt & kf == 1) |
-                                (macce_dt == aki_dt & aki == 1)
-                                ), macce_dt + 1, macce_dt),
          macce_tte = as.numeric(macce_dt - discharge_dt),
-         # MACCE with AKI
-         macce_aki = if_else(macce == 1 & aki == 1, 1, 0),
-         macce_aki_dt = if_else(macce_aki == 1, pmax(macce_dt, aki_dt), final_dt),
-         macce_aki_tte = as.numeric(macce_aki_dt - discharge_dt),
+         macce_type = case_when(macce == 1 & macce_dt == chd_dt ~ "chd",
+                                macce == 1 & macce_dt == cvd_dt ~ "cvd",
+                                macce == 1 & macce_dt == hfhosp_dt ~ "hfhosp",
+                                .default = NA),
+         # If death occurs on same day as MACCE, make that event occur one day earlier
+         macce_tte = if_else(death_tte == macce_tte & death == 1 & macce == 1, macce_tte - 1, macce_tte),
+         # If MACCE now occurs on the same day as KF, put KF one day earlier
+         kf_tte = if_else(macce == 1 & kf == 1 &
+                               macce_tte == kf_tte,
+                          kf_tte - 1, kf_tte),
+         # MACCE with kidney failure
+         macce_kf = if_else(macce == 1 & kf == 1, 1, 0),
+         macce_kf_dt = if_else(macce_kf == 1, pmax(macce_dt, kf_dt), final_dt),
+         macce_kf_tte = as.numeric(macce_kf_dt - discharge_dt))
+
+## 2.1.2. Save data ----
+save(dat_spine_em,
+     file = paste0(path, "outcome_derivation_em.Rdata"))
+
+## 2.2. Trajectory model (with and without AKI) ----
+### 2.2.1. Final computations ----
+# Set seed for random process
+set.seed(1)
+
+# Finalise spine data
+dat_spine_tm <- dat_spine %>%
+  # Adjust dates based on censoring, administrative censoring (2025-09-17) and 10-year final follow-up
+  mutate(# Administrative censoring
+         adm_cens_dt = as.Date("2025-09-17"),
+         # 10-year max. follow-up
+         end_fu_dt = discharge_dt + 10 * 365.25,
+         # Final date for each individual
+         final_dt = pmin(death_dt, adm_cens_dt, end_fu_dt, censor_dt, na.rm = TRUE),
+         # If final date is discharge, add 1 day and censor there
+         # We cannot exclude these individuals as lack of follow-up is future information;
+         # So we just give them minimal follow-up
+         final_dt = if_else(final_dt == discharge_dt, final_dt + 1, final_dt),
+         # Total follow-up in years
+         total_fu = as.numeric(final_dt - discharge_dt) / 365.25,
+         # Death variables
+         death = if_else(final_dt == death_dt, 1, 0, missing = 0),
+         death_dt = if_else(death == 1, death_dt, final_dt),
+         death_tte = as.numeric(death_dt - discharge_dt),
+         # Kidney failure variables
+         kf = if_else(kf_dt == pmin(kf_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
+         kf_dt = if_else(kf == 1, kf_dt, final_dt),
+         kf_tte = as.numeric(kf_dt - discharge_dt),
+         kf_type = if_else(kf == 1, kf_type, NA),
+         # If death occurs on same day as kidney failure, make that event occur one day earlier
+         kf_dt = if_else(death_tte == kf_tte & death == 1 & kf == 1, kf_dt - 1, kf_dt),
+         kf_tte = if_else(death_tte == kf_tte & death == 1 & kf == 1, kf_tte - 1, kf_tte),
+         # CKD variables (has to come before kidney failure)
+         ckd = if_else(ckd_dt == pmin(ckd_dt, kf_dt, na.rm = TRUE), 1, 0, missing = 0),
+         ckd_dt = case_when(
+           # If kidney failure and CKD occur on the same day
+           ckd == 1 & kf == 1 & ckd_dt == kf_dt ~ ckd_dt - 1,
+           # If not
+           ckd == 1 ~ ckd_dt, 
+           # If no CKD
+           .default = final_dt),
+         ckd_tte = as.numeric(ckd_dt - discharge_dt),
+         ckd_type = if_else(ckd == 1, ckd_type, NA),
+         # AKI variables (has to come before chronic kidney disease & kidney failure)
+         aki = if_else(aki_dt == pmin(aki_dt, ckd_dt, kf_dt, na.rm = TRUE), 1, 0, missing = 0),
+         aki_dt = case_when(
+           # If AKI and KF occur on the same day, and no CKD was diagnosed
+           aki == 1 & ckd == 0 & kf == 1 & aki_dt == kf_dt ~ aki_dt - 3, # because a CKD diagnosis needs to go inbetween
+           # If AKI and CKD occur on the same day
+           aki == 1 & ckd == 1 & aki_dt == ckd_dt ~ aki_dt - 1,
+           # If not
+           aki == 1 ~ aki_dt,
+           # If no AKI
+           .default = final_dt),
+         aki_tte = as.numeric(aki_dt - discharge_dt),
+         aki_type = if_else(aki == 1, aki_type, NA),
+         ## Artificial CKD date if KF occurred without CKD first
+         # Should artificial CKD diagnosis be added
+         ckd_art = if_else(kf == 1 & kf_dt < ckd_dt, 1, 0),
+         # How far along the time to KF did it occur? (Randomly drawn from normal distribution)
+         ckd_art_time = if_else(ckd_art == 1, rnorm(n(), mean = 0.5, sd = 0.1), NA),
+         ckd_tte = case_when(
+           # Without prior AKI
+           ckd_art == 1 & aki == 0 ~ ceiling(ckd_art_time * kf_tte),
+           # With prior AKI
+           ckd_art == 1 & aki == 1 ~ ceiling(ckd_art_time * (kf_tte - aki_tte) + aki_tte),
+           # Neither
+           .default = ckd_tte),
+         ckd_dt = if_else(ckd_art == 1, discharge_dt + ckd_tte, ckd_dt),
+         ckd_type = if_else(ckd_art == 1, "artificial", ckd_type),
+         ckd = if_else(ckd_art == 1, 1, ckd),
+         # Acute CHD variables
+         chd = if_else(chd_dt == pmin(chd_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
+         chd_dt = if_else(chd == 1, chd_dt, final_dt),
+         chd_tte = as.numeric(chd_dt - discharge_dt),
+         # Acute CVD variables
+         cvd = if_else(cvd_dt == pmin(cvd_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
+         cvd_dt = if_else(cvd == 1, cvd_dt, final_dt),
+         cvd_tte = as.numeric(cvd_dt - discharge_dt),
+         # Heart failure hospitalisation variables
+         hfhosp = if_else(hfhosp_dt == pmin(hfhosp_dt, final_dt, na.rm = TRUE), 1, 0, missing = 0),
+         hfhosp_dt = if_else(hfhosp == 1, hfhosp_dt, final_dt),
+         hfhosp_tte = as.numeric(hfhosp_dt - discharge_dt),
+         # MACCE
+         macce = pmax(chd, cvd, hfhosp),
+         macce_dt = if_else(macce == 1, pmin(chd_dt, cvd_dt, hfhosp_dt, na.rm = TRUE), final_dt),
+         macce_tte = as.numeric(macce_dt - discharge_dt),
+         macce_type = case_when(macce == 1 & macce_dt == chd_dt ~ "chd",
+                                macce == 1 & macce_dt == cvd_dt ~ "cvd",
+                                macce == 1 & macce_dt == hfhosp_dt ~ "hfhosp",
+                                .default = NA),
+         # If death occurs on same day as MACCE, make that event occur one day earlier
+         macce_tte = if_else(death_tte == macce_tte & death == 1 & macce == 1, macce_tte - 1, macce_tte),
+         # If MACCE now occurs on the same day as KF, put KF one day earlier
+         kf_tte = if_else(macce == 1 & kf == 1 & macce_tte == kf_tte, kf_tte - 1, kf_tte),
+         ckd_tte = if_else(macce == 1 & ckd == 1 & macce_tte == ckd_tte, ckd_tte - 1, ckd_tte),
+         aki_tte = if_else(macce == 1 & aki == 1 & macce_tte == aki_tte, aki_tte - 1, aki_tte),
+         # If KF and AKI now occur on the same day again, take a few days off of AKI tte
+         aki_tte = if_else(aki_tte == kf_tte & aki == 1 & kf == 1, aki_tte - 1, aki_tte),
          # MACCE with kidney failure
          macce_kf = if_else(macce == 1 & kf == 1, 1, 0),
          macce_kf_dt = if_else(macce_kf == 1, pmax(macce_dt, kf_dt), final_dt),
@@ -397,8 +498,16 @@ dat_spine %<>%
          # MACCE with CKD
          macce_ckd = if_else(macce == 1 & ckd == 1, 1, 0),
          macce_ckd_dt = if_else(macce_ckd == 1, pmax(macce_dt, ckd_dt), final_dt),
-         macce_ckd_tte = as.numeric(macce_ckd_dt - discharge_dt))
+         macce_ckd_tte = as.numeric(macce_ckd_dt - discharge_dt),
+         # MACCE with AKI
+         macce_aki = if_else(macce == 1 & aki == 1, 1, 0),
+         macce_aki_dt = if_else(macce_aki == 1, pmax(macce_dt, aki_dt), final_dt),
+         macce_aki_tte = as.numeric(macce_aki_dt - discharge_dt),
+         # Round all TTEs
+         across(contains("_tte"), round)) %>%
+  # Drop artificial CKD indicator
+  select(-ckd_art) 
 
-## 2.2. Save data ----
-save(dat_spine,
-     file = paste0(path, "outcome_derivation.Rdata"))
+## 2.2.2. Save data ----
+save(dat_spine_tm,
+     file = paste0(path, "outcome_derivation_tm.Rdata"))

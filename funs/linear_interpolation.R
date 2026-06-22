@@ -1,5 +1,8 @@
 # Function for linear interpolation of CKD
-linear_interpolation <- function(.data, threshold = 15, visual_representation = FALSE){
+linear_interpolation <- function(.data, threshold = 15, visual_representation = FALSE, add_id = FALSE){
+  # Get ID
+  id <- extract2(.data, "id")[[1]]
+  
   # Set date to time based on index date
   dat_tmp <- mutate(.data, time = as.numeric(lab_dt - discharge_dt))
   
@@ -23,6 +26,10 @@ linear_interpolation <- function(.data, threshold = 15, visual_representation = 
   
   # Create output
   output <- ttt
+  
+  # If ID should be added, overwrite output
+  if(add_id) output <- tibble(id = id,
+                              ttt = ttt)
   
   # Create visual representation if requested (requires ggplot2)
   if(visual_representation){

@@ -19,7 +19,8 @@ pacman::p_load("dplyr",          # Data wrangling
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
 # Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/"
+path <- psp(unix = "/Users/rjanse5/Networkshares/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/",
+            windows = "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/")
 
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
@@ -127,11 +128,11 @@ save(dat_death,
      file = paste0(path, "death.Rdata"))
 
 # Load data frames
-load(paste0(path, "dataframes/hosps.Rdata"))
-load(paste0(path, "dataframes/diagnoses_procedures.Rdata"))
-load(paste0(path, "dataframes/laboratory.Rdata"))
-load(paste0(path, "dataframes/creats.Rdata"))
-load(paste0(path, "dataframes/death.Rdata"))
+loadr("dataframes/hosps.Rdata")
+loadr("dataframes/diagnoses_procedures.Rdata")
+loadr("dataframes/laboratory.Rdata")
+loadr("dataframes/creats.Rdata")
+loadr("dataframes/death.Rdata")
 
 # 2. Cohort spine ----
 # We create the cohort spine based on AKI hospitalisation

@@ -1,5 +1,8 @@
 # Function to assess kidney disease based on two subequent measurements below a threshold
-two_measurements <- function(.data, threshold = 15, visual_representation = FALSE){
+two_measurements <- function(.data, threshold = 15, visual_representation = FALSE, add_id = FALSE){
+  # Get ID
+  id <- extract2(.data, "id")[[1]]
+  
   # Set date to time based on index date
   dat_tmp <- mutate(.data, time = as.numeric(lab_dt - discharge_dt))
   
@@ -49,6 +52,10 @@ two_measurements <- function(.data, threshold = 15, visual_representation = FALS
   
   # Store time stop in output (this is the diagnosis time)
   output <- time_stop
+  
+  # If ID should be added, overwrite output
+  if(add_id) output <- tibble(id = id,
+                              time_stop = time_stop)
   
   # Visual representation if requested
   if(visual_representation){
