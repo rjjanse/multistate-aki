@@ -15,31 +15,39 @@ editor: source
 pacman::p_load("dplyr",          # Data wrangling
                "magrittr",       # Efficient pipelines
                "tidyr",          # Data pivoting
+               "stringr",        # Working with strings
                "purrr",          # Functional programming
                "here",           # Local paths
                "tableone",       # Baseline characteristics table
                "ggplot2",        # Data visualisation
+               "calibmsm",       # Calibration for multistate models
                "patchwork",      # Patching plots together
+               "knitr",          # Printing to word
                "conflicted"      # Resolve function conflicts
 )
 
 # Resolve function conflicts
 conflicts_prefer(dplyr::filter) # Between stats and dplyr
 
-# Set data path
-path <- "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/"
-
 # Load functions
 walk(list.files(here("funs")), \(x) source(paste0(here("funs"), "/", x)))
 
-# Load spine data
-loadr("outcome_derivation.Rdata")
+# Set path
+path <- psp(unix = "/volumes/Data/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/",
+            windows = "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/")
 
-# Load model
-loadr("mstate_fit.Rdata")
+# Set path for figures
+path_fig <- psp(unix = "/Users/rjanse5/Library/CloudStorage/OneDrive-UMCUtrecht/Documenten/Projects/202508 - Multistate AKI - Denise/figures/",
+                windows = "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/")
 
-# Load predictions
-loadr("predictions.Rdata")
+# Load cohort data
+loadr("outcome_derivation_em.Rdata")
+
+# Load covars
+loadr("vec_covars.Rdata")
+
+# Set parameters for performance
+timepoints <- c(1:9 * 365.25, 3652)
 
 ```
 
@@ -53,14 +61,15 @@ vec_var <- c(# Demographics
              # Hospitalisation characteristics
              "los", "ihe_cts", "ihe_ncts", "ihe_resc",
              # Comorbidities
-             "com_arr", "com_aid", "com_cad", "com_cbvd", "com_copd", "com_diab", "com_hf", "com_hltx", "com_hyp", "com_liver", "com_mal", "com_pad",
-             "com_pckd",
+             "com_arr", "com_aid", "com_cad", "com_cbvd", "com_copd", "com_diab", "com_hf", "com_hltx", "com_hyp", "com_liver", 
+             "com_mal", "com_pad", "com_pckd",
              # Medication
              "med_aht", "med_ata", "med_gla", "med_ims", "med_lla", "med_ntd",
              # Laboratory values
-             "lab_hb", "hb_missing", "lab_k", "k_missing", "lab_n", "n_missing", "lab_urea", "urea_missing", "lab_crp", "crp_missing", "lab_gluc_nf",
-             "gluc_nf_missing", "lab_gluc_f", "gluc_f_missing", "lab_hba1c", "hba1c_missing", "lab_uacr", "uacr_missing")
-             
+             "lab_hb", "hb_missing", "lab_k", "k_missing", "lab_n", "n_missing", "lab_urea", "urea_missing", "lab_crp", "crp_missing",
+             "lab_gluc_nf",  "gluc_nf_missing", "lab_gluc_f", "gluc_f_missing", "lab_hba1c", "hba1c_missing", "lab_uacr", 
+             "uacr_missing")
+
 # Continuous variables
 vec_cnt <- c("age", "lab_bmi", "pre_aki_egfr", "egfr", "los", "lab_hb", "lab_k", "lab_n", "lab_urea", "lab_crp", "lab_gluc_nf", "lab_gluc_f", 
              "lab_hba1c", "lab_uacr")
@@ -74,7 +83,7 @@ vec_cat <- vec_var[!(vec_var %in% vec_cnt)]
 
 # Create table
 CreateTableOne(vec_var,
-               data = dat_spine,
+               data = dat_spine_em,
                factorVars = vec_cat) %>%
   # Print table to matrix
   print(printToggle = FALSE,
@@ -82,10 +91,173 @@ CreateTableOne(vec_var,
         noSpaces = TRUE,
         nonnormal = vec_nnormal) %>%
   # Set type to matrix
-  as.matrix()
-  
-
-
-
+  as.matrix() %>%
+  # Set row names
+  set_rownames(c("Number of individuals",
+                 "Age, yrs, median [IQR]",
+                 "Women, n (%)",
+                 "BMI, kg/m2, median [IQR]",
+                 "Missing BMI, n (%)",
+                 "AKI stage, n (%)",
+                 "Stage 1",
+                 "Stage 2",
+                 "Stage 3",
+                 "Required dialysis",
+                 "Pre-AKI eGFR, mL/min/1.73m2, median [IQR]",
+                 "Discharge eGFR, mL/min/1.73m2, median [IQR]",
+                 "Hospital length of stay, days, median [IQR]",
+                 "Cardiothoracic surgery",
+                 "Non-cardiothoracic surgery",
+                 "Rescuscitation",
+                 "Arrhythmias",
+                 "Autoimmune disease",
+                 "Coronary artery disease",
+                 "Cerebrovascular disease",
+                 "COPD",
+                 "Diabetes mellitus",
+                 "Heart failure",
+                 "Heart- or lung transplantation",
+                 "Hypertension",
+                 "Liver disease",
+                 "Malignancy",
+                 "Peripheral artery disease",
+                 "Polycystic kidney disease",
+                 "Antihypertensives",
+                 "Antithrombotic agents",
+                 "Glucose-lowering agents",
+                 "Immunosuppresives",
+                 "Lipid-lowering agents",
+                 "Nephrotoxic drugs",
+                 "Hb, mmol/L, median [IQR]",
+                 "Missing Hb, n (%)",
+                 "Potassium, mmol/L, mean (SD)",
+                 "Missing potassium, n (%)",
+                 "Sodium, mmol/L, median [IQR]",
+                 "Missing sodium, n (%)",
+                 "Urea, mmol/L, median [IQR]",
+                 "Missing urea, n (%)",
+                 "CRP, mg/L, median [IQR]",
+                 "Missing CRP, n (%)",
+                 "Non-fasting glucose, mmol/L, median [IQR]",
+                 "Missing non-fasting glucose, n (%)",
+                 "Fasting glucose, mmol/L, median [IQR]",
+                 "Missing fasting glucose, n (%)",
+                 "HbA1c, mmol/mol, median [IQR]",
+                 "Missing HbA1c, n (%)",
+                 "uACR, mg/mmol, median [IQR]",
+                 "Missing uACR, n (%)")) %>%
+  # Print as table
+  kable()
 
 ```
+
+# 2. Endpoint model
+```{r em set-up}
+# Load predictions
+loadr("predictions_fixed_em.Rdata")
+
+# Load multistate data
+loadr("dat_mstate_em.Rdata")
+
+# Load multistate fit object
+loadr("mstate_fit_em.Rdata")
+
+# Set outcomes
+outcomes <- c("kf", "macce", "macce_kf", "death")
+
+```
+
+## 2.1. Print model coefficients
+```{r}
+# Get coefficients
+tab_coef_em <- extract_coefs(fit)
+
+# Get baseline hazards at timepoints of interest
+tab_bhaz_em <- extract_bhaz(fit, timepoints)
+
+```
+
+## 2.2. Model performance
+### 2.2.1. PDI at every year
+```{r pdi em}
+# Prepare data for PDI calculation
+dat_pdi <- pdi_prep(dat_prds_fixed, timepoints, dat_spine_em, outcomes)
+
+# Calculate PDI for each timepoint
+dat_pdis_em <- bind_rows(lapply(timepoints, \(x) pdi(dat_pdi, outcomes, x)))
+
+# Change format for table
+tab_pdis_em <- dat_pdis_em %>%
+  # Create result column
+  mutate(
+    # Round PDI and rescaled PDI
+    across(pdi:pdi_resc, \(x) format(round(x, 2), nsmall = 2)),
+    # Create variable that contains both
+    pdi = paste0(pdi, " (", pdi_resc, ")")
+  ) %>%
+  # Drop PDI rescaled
+  select(-pdi_resc) %>%
+  # Set to wide format
+  pivot_wider(
+    names_from = "time",
+    values_from = "pdi"
+  )
+
+# Create plot for PDIs
+plt_pdis_em <- plot_pdi(dat_pdis_em, outcomes)
+
+# Save plot
+ggsaver(plt_pdis_em, "pdis_em", 8, 11)
+
+```
+
+```{r calibration em}
+# Prepare data for calibration
+lst_cal <- cal_prep(dat_spine_em, dat_prds_fixed, timepoints, outcomes)
+
+# Get calibration data at each timepoint
+dat_cal <- lapply(timepoints, \(x){
+  # Run calibration
+  dat_cal_timepoint <- cal(
+    dat_mstate = dat_mstate,
+    dat_raw = lst_cal[["dat_raw"]],
+    dat_prd = lst_cal[["dat_prd"]],
+    timepoint = x,
+    method = "mlr",
+    smoother = "loess",
+    w_covs = vec_covars
+  )
+  
+  # Return output
+  return(x = dat_cal_timepoint)
+})
+
+# Get calibration plots 
+plt_cal_em <- lapply(1:length(timepoints), \(x){
+  # Get calibration plot
+  p <- plot_cal(dat_cal[[x]][["dat_plot"]],
+           outcomes
+  )
+  
+  # Return plot
+  return(x = p)
+})
+
+# Save calibration plots
+walk(1:length(plt_cal_em), \(x) ggsaver(plt_cal_em[[x]], paste0("plt_cal_em_y", x), 6, 6))
+
+# Extract data for CITL
+dat_citl_em <- bind_rows(lapply(1:length(timepoints), \(x) extract_citl(dat_cal, x, outcomes)))
+
+# Table for CITL
+tab_citl_em <- dat_citl_em %>%
+  # Set to wide format
+  pivot_wider(
+    names_from = "time",
+    values_from = "citl"
+  )
+
+```
+
+
+
