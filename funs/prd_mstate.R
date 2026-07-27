@@ -28,8 +28,10 @@ prd_mstate <- function(.data, predictors, transition_matrix, t = 0, state = 1){
   dat_new %<>%
     # Set column values
     # If the number in the column name equals the stratum, get that value from the original columns, else set to 0
-    mutate(across(all_of(new_cols), function(x) x = ifelse(as.numeric(str_extract(cur_column(), "(?<=\\.)\\d{1,2}")) == trans, 
-                                                           dat_new[[str_replace(cur_column(), "\\.\\d{1,2}", "")]], 0))) %>%
+    mutate(across(all_of(new_cols), function(x){ 
+      x = ifelse(as.numeric(str_extract(cur_column(), "(?<=\\.)\\d{1,2}")) == trans, 
+                 dat_new[[str_replace(cur_column(), "\\.\\d{1,2}", "")]], 0)
+      })) %>%
     # Remove unnecessary variables
     select(-all_of(predictors))
   
@@ -39,14 +41,8 @@ prd_mstate <- function(.data, predictors, transition_matrix, t = 0, state = 1){
   # Total studynrs
   tot <- length(ids)
 
-  # Elapsed time
-  time_elapsed <- 0
-  
   # Get individual predictions
   all_probs <- do.call("rbind", lapply(1:tot, function(x){
-    # Iteration start time
-    start_time_iter <- Sys.time()
-    
     # Get ID
     id_iteration = ids[[x]]
     
@@ -64,18 +60,9 @@ prd_mstate <- function(.data, predictors, transition_matrix, t = 0, state = 1){
                        variance = FALSE)[[state]] %>%
       # Add studynr
       mutate(id = id_iteration)
-    
-    # End time iteration
-    end_time_iter <- Sys.time()
-    
-    # Time elapsed (in seconds)
-    time_elapsed <- time_elapsed + as.numeric(end_time_iter - start_time_iter)
 
-    # Remaining time
-    remaining_time <- round((tot - x) * ((time_elapsed / x) / 60))
-    
     # Iteration counter
-    cat("\rIteration", x, "/", tot , "with", remaining_time, "minutes remaining. Time elapsed:", round(time_elapsed / 60, 2), "minutes.     ")
+    cat("\rIteration", x, "/", tot)
     
     # Return probs
     return(probs)
