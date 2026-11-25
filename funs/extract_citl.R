@@ -12,10 +12,7 @@ extract_citl <- function(.list, x, outcomes){
       state = names(.list[[x]][["citl"]]),
       # Timepoint indicator
       time = timepoints[[x]]
-    ) %>%
-    # Drop state1 (censoring)
-    filter(state != "state1")
-  
+    )
   # All states
   states <- sort(unique(dat_citl[["state"]]))
   

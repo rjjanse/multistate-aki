@@ -1,6 +1,7 @@
 ---
 format: docx
 editor: source
+echo: false
 ---
 
 # 0. Set-up
@@ -19,6 +20,7 @@ pacman::p_load("dplyr",          # Data wrangling
                "purrr",          # Functional programming
                "here",           # Local paths
                "tableone",       # Baseline characteristics table
+               "survival",       # Extract baseline hazards
                "ggplot2",        # Data visualisation
                "calibmsm",       # Calibration for multistate models
                "patchwork",      # Patching plots together
@@ -40,14 +42,15 @@ path <- psp(unix = "/volumes/Data/lab/lab_research/RES-Folder-UPOD/NOSTRADAMUS_S
 path_fig <- psp(unix = "/Users/rjanse5/Library/CloudStorage/OneDrive-UMCUtrecht/Documenten/Projects/202508 - Multistate AKI - Denise/figures/",
                 windows = "L:/lab_research/RES-Folder-UPOD/NOSTRADAMUS_SALTRO/E_ResearchData/2_ResearchData/CLEANED_for_Multistate_outcomes_project/20012026/dataframes/")
 
-# Load cohort data
-loadr("outcome_derivation_em.Rdata")
+# Load cohort data for both cohorts
+loadr("outcome_derivation_em.Rdata"); loadr("outcome_derivation_tm.Rdata")
 
 # Load covars
-loadr("vec_covars.Rdata")
+loadr("vec_covars.Rdata"); vec_covars <- object
 
 # Set parameters for performance
-timepoints <- c(1:9 * 365.25, 3652)
+# Last timepoint is 3651, as we cannot assess calibration on the last day of model fit in calib_msm function
+timepoints <- c(1:9 * 365.25, 3651)
 
 ```
 
@@ -97,13 +100,13 @@ CreateTableOne(vec_var,
                  "Age, yrs, median [IQR]",
                  "Women, n (%)",
                  "BMI, kg/m2, median [IQR]",
-                 "Missing BMI, n (%)",
+                 "Missing BMI, n (%)",                 
+                 "Pre-AKI eGFR, mL/min/1.73m2, median [IQR]",
                  "AKI stage, n (%)",
                  "Stage 1",
                  "Stage 2",
                  "Stage 3",
                  "Required dialysis",
-                 "Pre-AKI eGFR, mL/min/1.73m2, median [IQR]",
                  "Discharge eGFR, mL/min/1.73m2, median [IQR]",
                  "Hospital length of stay, days, median [IQR]",
                  "Cardiothoracic surgery",
@@ -154,21 +157,29 @@ CreateTableOne(vec_var,
 # 2. Endpoint model
 ```{r em set-up}
 # Load predictions
-loadr("predictions_fixed_em.Rdata")
+loadr("predictions_fixed_em.Rdata"); dat_prds_fixed_em <- object
 
 # Load multistate data
-loadr("dat_mstate_em.Rdata")
+loadr("dat_mstate_em.Rdata"); dat_mstate <- dat_mstate_em <- object
 
 # Load multistate fit object
-loadr("mstate_fit_em.Rdata")
+loadr("mstate_fit_em.Rdata"); fit_em <- fit
 
 # Set outcomes
-outcomes <- c("kf", "macce", "macce_kf", "death")
+outcomes_em <- c("censored", "kf", "macce", "macce_kf", "death")
+
+# Add censoring as outcome to data
+dat_spine_em_cens <- dat_spine_em %>%
+  # Add variables
+  mutate( # Censoring indicator
+         censored = 1 - pmax(kf, macce, macce_kf, death),
+         # Censoring time
+         censored_tte = as.numeric(final_dt - discharge_dt))
 
 ```
 
 ## 2.1. Print model coefficients
-```{r}
+```{r em model coefficients}
 # Get coefficients
 tab_coef_em <- extract_coefs(fit)
 
@@ -178,42 +189,39 @@ tab_bhaz_em <- extract_bhaz(fit, timepoints)
 ```
 
 ## 2.2. Model performance
-### 2.2.1. PDI at every year
+### 2.2.1. PDI at every timepoint
 ```{r pdi em}
 # Prepare data for PDI calculation
-dat_pdi <- pdi_prep(dat_prds_fixed, timepoints, dat_spine_em, outcomes)
+dat_pdi <- pdi_prep(dat_prds_fixed_em, timepoints, dat_spine_em_cens, outcomes_em)
 
 # Calculate PDI for each timepoint
-dat_pdis_em <- bind_rows(lapply(timepoints, \(x) pdi(dat_pdi, outcomes, x)))
+dat_pdis_em <- bind_rows(lapply(timepoints, \(x) pdi(dat_pdi, outcomes_em, x)))
 
 # Change format for table
 tab_pdis_em <- dat_pdis_em %>%
-  # Create result column
-  mutate(
-    # Round PDI and rescaled PDI
-    across(pdi:pdi_resc, \(x) format(round(x, 2), nsmall = 2)),
-    # Create variable that contains both
-    pdi = paste0(pdi, " (", pdi_resc, ")")
-  ) %>%
-  # Drop PDI rescaled
-  select(-pdi_resc) %>%
+  # Format PDI
+  mutate(pdi = format(round(pdi, 2), nsmall = 2)) %>%
   # Set to wide format
   pivot_wider(
     names_from = "time",
     values_from = "pdi"
   )
 
+# Print table
+kable(tab_pdis_em)
+
 # Create plot for PDIs
-plt_pdis_em <- plot_pdi(dat_pdis_em, outcomes)
+plt_pdis_em <- plot_pdi(dat_pdis_em, outcomes_em)
 
 # Save plot
-ggsaver(plt_pdis_em, "pdis_em", 8, 11)
+ggsaver(plt_pdis_em, "pdis_em", 12, 8)
 
 ```
 
+### 2.2.2. Calibration at every timepoint
 ```{r calibration em}
 # Prepare data for calibration
-lst_cal <- cal_prep(dat_spine_em, dat_prds_fixed, timepoints, outcomes)
+lst_cal <- cal_prep(dat_spine_em, dat_prds_fixed_em, timepoints, outcomes_em)
 
 # Get calibration data at each timepoint
 dat_cal <- lapply(timepoints, \(x){
@@ -236,7 +244,7 @@ dat_cal <- lapply(timepoints, \(x){
 plt_cal_em <- lapply(1:length(timepoints), \(x){
   # Get calibration plot
   p <- plot_cal(dat_cal[[x]][["dat_plot"]],
-           outcomes
+           outcomes_em
   )
   
   # Return plot
@@ -247,10 +255,135 @@ plt_cal_em <- lapply(1:length(timepoints), \(x){
 walk(1:length(plt_cal_em), \(x) ggsaver(plt_cal_em[[x]], paste0("plt_cal_em_y", x), 6, 6))
 
 # Extract data for CITL
-dat_citl_em <- bind_rows(lapply(1:length(timepoints), \(x) extract_citl(dat_cal, x, outcomes)))
+dat_citl_em <- bind_rows(lapply(1:length(timepoints), \(x) extract_citl(dat_cal, x, outcomes_em)))
 
 # Table for CITL
 tab_citl_em <- dat_citl_em %>%
+  # Round CITL
+  mutate(citl = round(citl, 3)) %>%
+  # Set to wide format
+  pivot_wider(
+    names_from = "time",
+    values_from = "citl"
+  )
+
+# Print table
+kable(tab_citl_em)
+
+```
+
+# 3. Transition model
+```{r tm set-up}
+# Load predictions
+loadr("predictions_fixed_tm.Rdata"); dat_prds_fixed_tm <- object
+
+# Load multistate data
+loadr("dat_mstate_tm.Rdata"); dat_mstate <- dat_mstate_tm <- object
+
+# Load multistate fit object
+loadr("mstate_fit_tm.Rdata"); fit_tm <- fit
+
+# Set outcomes
+outcomes_tm <- c("censored", "ckd", "kf", "macce", "macce_ckd", "macce_kf", "death")
+
+# Add censoring as outcome to data
+dat_spine_tm_cens <- dat_spine_tm %>%
+  # Add variables
+  mutate( # Censoring indicator
+         censored = 1 - pmax(ckd, kf, macce, macce_ckd, macce_kf, death),
+         # Censoring time
+         censored_tte = as.numeric(final_dt - discharge_dt))
+
+```
+
+## 3.1. Print model coefficients
+```{r tm model coefficients}
+# Get coefficients
+tab_coef_tm <- extract_coefs(fit)
+
+# Get baseline hazards at timepoints of interest
+tab_bhaz_tm <- extract_bhaz(fit, timepoints)
+
+```
+
+## 3.2. Model performance
+### 3.2.1. PDI at every timepoint
+```{r pdi tm}
+# Prepare data for PDI calculation
+dat_pdi <- pdi_prep(dat_prds_fixed_tm, timepoints, dat_spine_tm_cens, outcomes_tm)
+
+# Calculate PDI for each timepoint
+dat_pdis_tm <- bind_rows(lapply(timepoints, \(x) pdi(dat_pdi, outcomes_tm, x)))
+
+# Change format for table
+tab_pdis_tm <- dat_pdis_tm %>%
+  # Format PDI
+  mutate(pdi = format(round(pdi, 2), nsmall = 2)) %>%
+  # Set to wide format
+  pivot_wider(
+    names_from = "time",
+    values_from = "pdi"
+  )
+
+# Print table
+kable(tab_pdis_tm)
+
+# Create plot for PDIs
+plt_pdis_tm <- plot_pdi(dat_pdis_tm, outcomes_tm)
+
+# Save plot
+ggsaver(plt_pdis_tm, "pdis_tm", 12, 8)
+
+```
+
+### 3.2.2. Calibration at every timepoint
+```{r calibration tm}
+#| eval: false
+#| include: false
+# Prepare data for calibration
+lst_cal <- cal_prep(dat_spine_tm_cens, dat_prds_fixed_tm, timepoints, outcomes_tm)
+
+# Get calibration data at each timepoint
+dat_cal <- lapply(timepoints, \(x){
+  # Run calibration
+  dat_cal_timepoint <- cal(
+    dat_mstate = dat_mstate,
+    dat_raw = lst_cal[["dat_raw"]],
+    dat_prd = lst_cal[["dat_prd"]],
+    timepoint = x,
+    method = "mlr",
+    smoother = "loess", # Only matters for the internal function: we draw the smoother using GAM in function plot_cal
+    w_covs = vec_covars
+  )
+  
+  # Return output
+  return(x = dat_cal_timepoint)
+})
+
+# Save complete calibration data
+saver(dat_cal, "dat_cal_tm.Rdata")
+
+# Get calibration plots 
+plt_cal_tm <- lapply(1:length(timepoints), \(x){
+  # Get calibration plot
+  p <- plot_cal(dat_cal[[x]][["dat_plot"]],
+           outcomes_tm
+  )
+  
+  # Return plot
+  return(x = p)
+})
+
+# Save calibration plots
+walk(1:length(plt_cal_tm), \(x) ggsaver(plt_cal_tm[[x]], paste0("plt_cal_tm_y", x), 6, 6))
+
+# Extract data for CITL
+dat_citl_tm <- bind_rows(lapply(1:length(timepoints), \(x) extract_citl(dat_cal, x, outcomes_tm)))
+
+# Table for CITL
+tab_citl_tm <- dat_citl_tm %>%
+  # Round CITL
+  mutate(citl = round(citl, 3)) %>%
   # Set to wide format
   pivot_wider(
     names_from = "time",
@@ -259,5 +392,364 @@ tab_citl_em <- dat_citl_em %>%
 
 ```
 
+# 4. Print tables
+```{r pdi tables}
+# Combine tables with headings
+bind_rows(tibble(outcome = "endpoint"),
+          tab_pdis_em, 
+          tibble(outcome = "endpoint + ckd"),
+          tab_pdis_tm) %>%
+  # Print table
+  kable()
+
+# Combine and print coefficient tables
+bind_rows(tibble(var = "endpoint"),
+          tab_coef_em, 
+          tibble(var = "endpoint + ckd"),
+          tab_coef_tm) %>%
+  # Print table
+  kable()
+
+# Combine and print baseline hazard tables
+bind_rows(tibble(outcome = "endpoint"),
+          tab_bhaz_em, 
+          tibble(outcome = "endpoint + ckd"),
+          tab_bhaz_tm) %>%
+  # Print table
+  kable()
+
+# Print CITL table
+kable(tab_citl_em)
+
+```
+
+# 5. Example patients
+## 5.1. Selection of two patients
+```{r}
+# Select two people
+vec_ids_exm <- dat_spine_em[["id"]][c(20, 131)]
+
+# Subset data
+dat_exm <- filter(dat_spine_em, id %in% vec_ids_exm)                       # Subset spine data for descriptive table
+dat_prds_exm_em_a <- filter(dat_prds_fixed_em, id %in% vec_ids_exm[[1]])   # Subset endpoint model predictions for A
+dat_prds_exm_tm_a <- filter(dat_prds_fixed_tm, id %in% vec_ids_exm[[1]])   # Subset endpoint + CKD model predictions for A
+dat_prds_exm_em_b <- filter(dat_prds_fixed_em, id %in% vec_ids_exm[[2]])   # Subset endpoint model predictions for A
+dat_prds_exm_tm_b <- filter(dat_prds_fixed_tm, id %in% vec_ids_exm[[2]])   # Subset endpoint + CKD model predictions for A
+
+```
+
+## 5.2. Descriptive table
+```{r}
+# Add stratifier to baseline data of example patients
+dat_exm %<>% mutate(pat = if_else(row_number() == 1, "A", "B"))
+
+# List of variables that are also predictors
+vec_var <- c(# Demographics
+             "age", "female", 
+             # Index AKI
+             "stage", 
+             # Hospitalisation characteristics
+             "los", "ihe_cts", "ihe_ncts", 
+             # Comorbidities
+             "com_arr", "com_cad", "com_cbvd", "com_copd", "com_diab", "com_hf", "com_hyp", "com_mal", 
+             # Medication
+             "med_ims", "med_lla", "med_ntd")
+
+# Continuous variables
+vec_cnt <- c("age", "los", "stage")
+
+# Categorical variables
+vec_cat <- vec_var[!(vec_var %in% vec_cnt)]
+
+# Create table
+(tab_exm <- CreateTableOne(vec_var,
+                           data = dat_exm,
+                           factorVars = vec_cat,
+                           strata = "pat") %>%
+  # Print table to matrix
+  print(printToggle = FALSE,
+        contDigits = 1,
+        noSpaces = TRUE) %>%
+  # Set class to data frame
+  as.data.frame() %>%
+  # Drop test columns
+  select(-c(p, test)) %>%
+  # Change values
+  mutate(# Get row name as variable
+         rowname = rownames(.),
+         # Drop decimals and incalculable measures of spread
+         across(A:B, \(x) str_replace(x, "\\.0 \\(NA\\)", "")),
+         # Set dichotomous variables to yes/no
+         across(A:B, \(x) case_when(str_detect(rowname, "= 1 \\(%\\)") & str_detect(x, "1 \\(") ~ "Yes", 
+                                    str_detect(rowname, "= 1 \\(%\\)") & str_detect(x, "0 \\(") ~ "No",
+                                    .default = x)),
+         across(A:B, \(x) case_when(str_detect(rowname, "= 0 \\(%\\)") & str_detect(x, "1 \\(") ~ "No", 
+                                    str_detect(rowname, "= 0 \\(%\\)") & str_detect(x, "0 \\(") ~ "Yes",
+                                    .default = x)),
+         # Set sex to female/male
+         across(A:B, \(x) case_when(str_detect(rowname, "female") & str_detect(x, "Yes") ~ "Female", 
+                                    str_detect(rowname, "female") & str_detect(x, "No") ~ "Male",
+                                    .default = x))) %>%
+  # Set row names
+  set_rownames(c("Number of individuals",
+                 "Age, yrs",
+                 "Sex",
+                 "AKI stage, n (%)",
+                 "Hospital length of stay, days",
+                 "Cardiothoracic surgery",
+                 "Non-cardiothoracic surgery",
+                 "Arrhythmias",
+                 "Coronary artery disease",
+                 "Cerebrovascular disease",
+                 "COPD",
+                 "Diabetes mellitus",
+                 "Heart failure",
+                 "Hypertension",
+                 "Malignancy",
+                 "Immunosuppresives",
+                 "Lipid-lowering agents",
+                 "Nephrotoxic drugs")) %>%
+  # Drop first row
+  filter(rowname != "n") %>%
+  # Drop rownames
+  select(-rowname) %>%
+  # Set columnnames
+  set_colnames(c("Individual A", "Individual B"))) %>%
+  # Print as table
+  kable()
 
 
+# Write to .xlsx
+writexl::write_xlsx(tab_exm %>% mutate(var = rownames(.)), path = paste0(path, "tab_exm.xlsx"))
+
+```
+
+## 5.3. Example plots
+```{r}
+# Create plots
+lst_exm <- list(plot_rsk(dat_prds_exm_em_a, outcomes_em, timepoints, verbose_legend = TRUE),
+                plot_rsk(dat_prds_exm_em_b, outcomes_em, timepoints, verbose_legend = TRUE),
+                plot_rsk(dat_prds_exm_tm_a, outcomes_tm, timepoints),
+                plot_rsk(dat_prds_exm_tm_b, outcomes_tm, timepoints))
+
+# Wrap plots
+plt_exm <- wrap_plots(lst_exm,
+                      guides = "collect") +
+  # Annotations
+  plot_annotation(tag_levels = lst(c("A.1", "B.1", "A.2", "B.2"))) &
+  # Relocate legend
+  theme(legend.position = "bottom")
+
+# Save figure
+ggsaver(plt_exm, "example", 8, 8)
+
+```
+
+## 5.4. Example calculations
+### 5.4.1. Ensure data anonymity
+```{r}
+# Create aggregate dat_mstate object
+dat_mstate %<>%
+  # Arrange for grouping
+  arrange(id) %>%
+  # Group per person
+  group_by(id) %>%
+  # Create ID based on group index
+  mutate(id = cur_group_id()) %>%
+  # Remove grouping structure
+  ungroup() %>%
+  # Aggregate other information
+  mutate(
+    # Continuous variables
+    across(
+      all_of(setdiff(colnames(dat_mstate)[sapply(colnames(dat_mstate), \(x) n_distinct(dat_mstate[[x]]) > 3)], 
+                     c("id", "from", "to", "trans", "Tstart", "Tstop", "time"))), mean
+    ),
+    # Non-continuous variables
+    across(
+      all_of(setdiff(colnames(dat_mstate)[sapply(colnames(dat_mstate), \(x) n_distinct(dat_mstate[[x]]) < 3)], 
+                     c("id", "status"))), min
+    ),
+  )
+
+# Introduce noise into coefficients and linear predictors to prevent back-calculation
+# Seed for random process
+set.seed(1)
+
+# Jitter coefficients
+fit[["coefficients"]] <- jitter(fit[["coefficients"]], factor = 0.001)
+
+# Jitter linear predictors
+fit[["linear.predictors"]] <- jitter(fit[["linear.predictors"]], factor = 0.001)
+
+# Get predictions from model to check with new dat_mstate object
+dat_prds_exm <- prd_mstate(dat_exm, vec_covars, mat_trans)
+
+# Check with real predictions: 4 decimals is sufficient precision
+table(round(dat_prds_exm_em_a, 3) == round(filter(dat_prds_exm, id == vec_ids_exm[[1]]), 3))
+table(round(dat_prds_exm_em_b, 3) == round(filter(dat_prds_exm, id == vec_ids_exm[[2]]), 3))
+
+# Check FALSE's
+dat_prds_exm_em_a[!(round(dat_prds_exm_em_a, 3) == round(filter(dat_prds_exm, id == vec_ids_exm[[1]]), 3))]
+filter(dat_prds_exm, id == vec_ids_exm[[1]])[!(round(dat_prds_exm_em_a, 3) == round(filter(dat_prds_exm, id == vec_ids_exm[[1]]), 3))]
+
+# Unique transition combinations
+dat_mstate %>%
+  # Drop ID 
+  select(-id) %>%
+  # Group by all variables
+  group_by_all() %>%
+  # Count unique rows
+  count() %>%
+  # Keep one row per group
+  slice(1L) %>%
+  # Drop grouping structure
+  ungroup() %>%
+  # Keep only varying variables
+  select(from:status, n)
+
+```
+
+## 5.5. Perform example calculation
+```{r}
+# Load packages
+pacman::p_load("dplyr",          # Data wrangling
+               "magrittr",       # Efficient pipelines
+               "stringr",        # Working with character strings
+               "survival",       # Survival models
+               "mstate",         # Multistate models
+               "conflicted"      # Resolve function conflicts
+)
+
+# Source required objects
+source("https://github.com/rjjanse/multistate-aki/raw/refs/heads/main/individual_predictions.R")
+
+# Set-up data for individual
+dat_predictors <- dat_prep(age = 61,
+                           female = 1,
+                           aki_stage = 2,
+                           los = 17,
+                           arrhythmia = 0,
+                           cad = 1,
+                           cbvd = 0,
+                           copd = 0,
+                           diabetes = 1,
+                           heartfailure = 0,
+                           hypertension = 1,
+                           malignancy = 0,
+                           immunosuppresives = 0,
+                           lipidloweringagents = 1,
+                           nephrotoxicdrugs = 1,
+                           cardiothoracicsurg = 0,
+                           noncardiothoracicsurg = 0)
+
+# Calculate predictions
+dat_predictions <- prd_mstate(dat_predictors, vec_predictors, mat_trans)
+
+```
+
+## 5.6. Two hypothetical patients for manuscript
+### 5.6.1. Endpoint model
+```{r}
+# Transition matrix
+mat_trans <- structure(c(NA, NA, NA, NA, NA, 1L, NA, NA, NA, 
+                         NA, 2L, NA, NA, NA, NA, NA, 4L, 6L, 
+                         NA, NA, 3L, 5L, 7L, 8L, NA), 
+                       dim = c(5L, 5L), 
+                       dimnames = 
+                         list(from = c("Baseline", "KF", "MACCE", 
+                                       "MACCE_KF", "Death"), 
+                              to = c("Baseline", "KF", "MACCE", 
+                                     "MACCE_KF", "Death")))
+
+# Model fit
+fit <- fit_em
+
+# mstate data
+dat_mstate <- dat_mstate_em
+
+# Set-up data for individual
+dat_predictors <- dat_prep(age = c(61, 73),
+                           female = 1:0,
+                           aki_stage = 2:1,
+                           los = c(17, 24),
+                           arrhythmia = 0,
+                           cad = 1:0,
+                           cbvd = 0,
+                           copd = 0,
+                           diabetes = 1,
+                           heartfailure = 0:1,
+                           hypertension = 1,
+                           malignancy = 0,
+                           immunosuppresives = 0,
+                           lipidloweringagents = 1,
+                           nephrotoxicdrugs = 1:0,
+                           cardiothoracicsurg = 1,
+                           noncardiothoracicsurg = 0)
+
+# Calculate predictions
+dat_exm_em <- prd_mstate(dat_predictors, vec_predictors, mat_trans)
+
+```
+
+### 5.6.2. Transition model
+```{r}
+# Transition matrix
+mat_trans <- structure(c(NA, NA, NA, NA, NA, NA, NA, 1L, NA, NA, NA, NA, NA, 
+                         NA, NA, 4L, NA, NA, NA, NA, NA, 2L, NA, NA, NA, NA, NA, NA, NA, 
+                         5L, NA, 9L, NA, NA, NA, NA, NA, 7L, NA, 11L, NA, NA, 3L, 6L, 
+                         8L, 10L, 12L, 13L, NA), 
+                       dim = c(7L, 7L), 
+                       dimnames = list(from = c("Baseline", "CKD", "KF", "MACCE", "MACCE_CKD", "MACCE_KF", "Death"), 
+                                       to = c("Baseline", "CKD", "KF", "MACCE", "MACCE_CKD", "MACCE_KF", "Death")))
+
+# Model fit
+fit <- fit_tm
+
+# mstate data
+dat_mstate <- dat_mstate_tm
+
+# Set-up data for individual
+dat_predictors <- dat_prep(age = c(61, 73),
+                           female = 1:0,
+                           aki_stage = 2:1,
+                           los = c(17, 24),
+                           arrhythmia = 0,
+                           cad = 1:0,
+                           cbvd = 0,
+                           copd = 0,
+                           diabetes = 1,
+                           heartfailure = 0:1,
+                           hypertension = 1,
+                           malignancy = 0,
+                           immunosuppresives = 0,
+                           lipidloweringagents = 1,
+                           nephrotoxicdrugs = 1:0,
+                           cardiothoracicsurg = 1,
+                           noncardiothoracicsurg = 0)
+
+# Calculate predictions
+dat_exm_tm <- prd_mstate(dat_predictors, vec_predictors, mat_trans)
+
+```
+
+### 5.6.3. Create plots
+```{r}
+# Create plots
+lst_exm <- list(plot_rsk(filter(dat_exm_em, id == 1), outcomes_em, timepoints, verbose_legend = TRUE),
+                plot_rsk(filter(dat_exm_em, id == 2), outcomes_em, timepoints, verbose_legend = TRUE),
+                plot_rsk(filter(dat_exm_tm, id == 1), outcomes_tm, timepoints),
+                plot_rsk(filter(dat_exm_tm, id == 2), outcomes_tm, timepoints))
+
+# Wrap plots
+plt_exm <- wrap_plots(lst_exm,
+                      guides = "collect") +
+  # Annotations
+  plot_annotation(tag_levels = lst(c("A.1", "B.1", "A.2", "B.2"))) &
+  # Relocate legend
+  theme(legend.position = "bottom")
+
+# Save figure
+ggsaver(plt_exm, "hypothetical_example", 8, 8)
+
+```

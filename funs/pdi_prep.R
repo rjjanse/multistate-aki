@@ -15,8 +15,10 @@ pdi_prep <- function(.data, timepoints, dat_outcome, outcomes){
     filter(time %in% tps) %>%
     # Join outcome
     left_join(dat_outcome %>%
+                # Determine first event time
+                mutate(first_event_tte = apply(select(., all_of(setdiff(paste0(outcomes, "_tte"), "censored_tte"))), 1, min)) %>%
                 # Select relevant columns
-                select(id, all_of(outcomes_tte)) %>%
+                select(id, all_of(outcomes_tte), first_event_tte) %>%
                 # Pivot to long format 
                 # This gives a warning because tte column will be NA, but we fix this below
                 pivot_longer(all_of(outcomes_tte),
@@ -26,15 +28,16 @@ pdi_prep <- function(.data, timepoints, dat_outcome, outcomes){
                 # Set NA in tte column to indicate occurrence
                 mutate(tte = if_else(is.na(tte), "occurred", tte)) %>%
                 # Pivot tte back to wide format
-                pivot_wider(id_cols = c(id, event),
+                pivot_wider(id_cols = c(id, event, first_event_tte),
                             names_from = "tte",
                             values_from = "occurred"),
               # Join on ID
               "id",
               # Individuals occur multiple times in both data frames
               relationship = "many-to-many") %>%
-    # Keep only events
-    filter(occurred == 1 & tte <= time) %>%
+    # Keep only events and censoring
+    filter((event != "censored" & occurred == 1 & tte <= time) |   # Occurence of event
+           (event == "censored" & time <= first_event_tte)) %>%    # First event has not occurred yet
     # Outcome placeholder
     mutate(outcome = NA) %>%
     # Suppress warning that occurrs due to pivot_longer (see above annotation)
@@ -48,12 +51,14 @@ pdi_prep <- function(.data, timepoints, dat_outcome, outcomes){
   
   # Finalise PDI data
   dat_pdi %<>%
+    # Drop first event tte
+    select(-first_event_tte) %>%
     # Set outcome to numeric
     mutate(outcome = as.numeric(outcome)) %>%
     # Rename pstate columns and drop pstate1 (this is the censoring state)
-    set_colnames(c("time", paste0("p", 0:length(outcomes)), "id", "event", "occurred", "tte", "outcome")) %>%
+    set_colnames(c("time", paste0("p", 1:length(outcomes)), "id", "event", "occurred", "tte", "outcome")) %>%
     # Keep only relevant columns
-    select(time, outcome, all_of(str_replace(vec_cols, "state", "")[1:length(vec_cols) - 1])) %>%
+    select(time, outcome, all_of(str_replace(vec_cols, "state", "")[1:length(vec_cols)])) %>%
     # Set to data frame (instead of tibble)
     as.data.frame()
   

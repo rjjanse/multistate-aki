@@ -2,9 +2,7 @@
 plot_cal <- function(.list, 
                      outcomes){
   # Prepare plotting data
-  dat_plot <- bind_rows(lapply(1:length(.list), \(x) .list[[x]] %<>% mutate(state = names(.list)[[x]]))) %>%
-    # Drop first state 
-    filter(state != "state1") 
+  dat_plot <- bind_rows(lapply(1:length(.list), \(x) .list[[x]] %<>% mutate(state = names(.list)[[x]]))) 
   
   # All states
   states <- sort(unique(dat_plot[["state"]]))
@@ -16,11 +14,12 @@ plot_cal <- function(.list,
   for(i in 1:length(outcomes)) dat_plot %<>% mutate(state = if_else(state == states[[i]], outcomes[[i]], state))
 
   # Define outcome labels
-  outcomes_labs <- case_match(outcomes,
-                              c("kf", "macce", "ckd") ~ toupper(outcomes),
-                              "aki" ~ "Recurent AKI",
-                              "death" ~ "Death",
-                              c("macce_aki", "macce_ckd", "macce_kf") ~ toupper(str_replace(outcomes, "_", " + ")))
+  outcomes_labs <- recode_values(outcomes,
+                                 "censored" ~ "No event",
+                                 c("kf", "macce", "ckd") ~ toupper(outcomes),
+                                 "aki" ~ "Recurent AKI",
+                                 "death" ~ "Death",
+                                 c("macce_aki", "macce_ckd", "macce_kf") ~ toupper(str_replace(outcomes, "_", " + ")))
   
   # Set states to factor
   dat_plot %<>% mutate(state = factor(state,
@@ -28,20 +27,18 @@ plot_cal <- function(.list,
                                       labels = outcomes_labs))
   
   # Palette
-  palette <- c("#4B6BC0",  # 1: AKI
+  palette <- c("#4B6BC0",  # 1: Censored
                "#648FFF",  # 2: CKD
                "#785EF0",  # 3: KF
-               "#AA42B8",  # 4: MACCE
-               "#DC267F",  # 5: MACCE + AKI
-               "#ED4440",  # 6: MACCE + CKD
-               "#FE6100",  # 7: MACCE + KF
-               "#FFB000"   # 8: Death
+               "#DC267F",  # 4: MACCE
+               "#ED4440",  # 5: MACCE + CKD
+               "#FE6100",  # 6: MACCE + KF
+               "#FFB000"   # 7: Death
                )
   
   # Selected colours for different nr. of categories
-  if(n_states == 4) pal <- palette[c(3, 4, 7, 8)] 
-  if(n_states == 6) pal <- palette[c(2:4, 6:8)]
-  if(n_states == 8) pal <- palette
+  if(n_states == 5) pal <- palette[c(1, 3, 4, 6, 7)] 
+  if(n_states == 7) pal <- palette
   
   # Create plot
   p <- ggplot(dat_plot,

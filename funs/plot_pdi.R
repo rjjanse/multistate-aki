@@ -1,10 +1,11 @@
 # Function to plot PDI
 plot_pdi <- function(.data, outcomes, c1 = "#785EF0", c2 = "#FE6100"){
   # Calculate lower bound of PDI
-  lb <- 1 / (length(unique(.data[["outcome"]])) - 1)
+  lb <- 1 / (n_distinct(.data[["outcome"]]) - 1)
   
   # Define outcome labels
   outcomes_labs <- case_match(outcomes,
+                              "censored" ~ "No event",
                               c("kf", "macce", "ckd") ~ toupper(outcomes),
                               "aki" ~ "Recurent AKI",
                               "death" ~ "Death",
@@ -22,10 +23,10 @@ plot_pdi <- function(.data, outcomes, c1 = "#785EF0", c2 = "#FE6100"){
                      time = factor(time,
                                    levels = paste0("Year ", 1:10)))
     
-  # Create plot for original PDI
-  p_orig <- ggplot(dat_plot,
-                   aes(x = pdi,
-                       y = outcome)) +
+  # Create plot for PDI
+  p <- ggplot(dat_plot,
+              aes(x = pdi,
+                  y = outcome)) +
     # Geometries
     geom_vline(xintercept = lb,
                linetype = "dashed",
@@ -36,13 +37,13 @@ plot_pdi <- function(.data, outcomes, c1 = "#785EF0", c2 = "#FE6100"){
                shape = "circle") +
     # Scales
     scale_x_continuous(name = "PDI",
-                       limits = c(0.25, 1),
-                       breaks = seq(0.25, 1, 0.15)) +
+                       limits = c(lb, 1),
+                       breaks = round(seq(lb, 1, length.out = 6), digits = 2)) +
     scale_y_discrete(limits = rev) +
     # Transformations
     facet_wrap(vars(time),
-               ncol = 1,
-               axes = "all") +
+               axes = "all",
+               axis.labels = "margins") +
     # Aesthetics
     theme(plot.background = element_rect(colour = "white",
                                          fill = "white"),
@@ -52,43 +53,7 @@ plot_pdi <- function(.data, outcomes, c1 = "#785EF0", c2 = "#FE6100"){
           axis.title.y = element_blank(),
           strip.text = element_text(face = "bold"),
           strip.background = element_blank())
-  
-  # Create plot for rescaled PDI
-  p_resc <- ggplot(dat_plot,
-                   aes(x = pdi_resc,
-                       y = outcome)) +
-    # Geometries
-    geom_vline(xintercept = 0.5,
-               linetype = "dashed",
-               colour = "black",
-               alpha = 0.3) +
-    geom_point(alpha = 0.75,
-               colour = c2,
-               shape = "triangle") +
-    # Scales
-    scale_x_continuous(name = "Rescaled PDI",
-                       limits = c(0.5, 1),
-                       breaks = seq(0.5, 1, 0.1)) +
-    scale_y_discrete(limits = rev) +
-    # Transformations
-    facet_wrap(vars(time),
-               ncol = 1,
-               axes = "all") +
-    # Aesthetics
-    theme(plot.background = element_rect(colour = "white",
-                                         fill = "white"),
-          panel.background = element_blank(),
-          panel.grid = element_blank(),
-          axis.line = element_line(),
-          axis.title.y = element_blank(),
-          axis.text.y = element_blank(),
-          strip.text = element_text(face = "bold"),
-          strip.background = element_blank())
-  
-  # Combine plots
-  p <- wrap_plots(p_orig, p_resc,
-                  ncol = 2)
-  
+
   # Return plot
   return(p)
 }

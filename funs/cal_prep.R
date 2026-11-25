@@ -1,5 +1,8 @@
 # Function to prepare data for calibration plots
 cal_prep <- function(dat_outcome, dat_prd, timepoints, outcomes){
+  # Drop censoring from outcome vector (calib_msm already takes it into account)
+  outcomes <- setdiff(outcomes, "censored")
+  
   # Add tte variables to outcome vector
   outcomes_tte <- c(outcomes, paste0(outcomes, "_tte"))
   

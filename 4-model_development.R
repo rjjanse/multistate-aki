@@ -164,6 +164,9 @@ dat_mstate <- expand.covs(dat_mstate, vec_covars, append = TRUE)
 # Event count
 events(dat_mstate)[["Frequencies"]]
 
+# Save mstate data (for calibration in script 5)
+saver(dat_mstate, "dat_mstate_tm.Rdata")
+
 ## 2.2. Fit model ----
 # Model right hand side
 model_rhs <- paste0(colnames(dat_mstate)[str_detect(colnames(dat_mstate), "\\.\\d")], collapse = " + ")
@@ -187,6 +190,7 @@ dat_prds <- prd_mstate(dat_spine_tm, vec_covars, mat_trans)
 # Save predictions
 saver(dat_prds, "predictions_tm.Rdata")
 
+# Fix predictions
 dat_prds_fixed <- prd_fix(dat_prds)
   
 # Save fixed predictions
