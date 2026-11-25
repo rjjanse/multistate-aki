@@ -18,9 +18,7 @@ pdi <- function(.data, outcomes, timepoint){
       # Indicator for outcome
       outcome = c("overall", outcomes),
       # Indicator for timeopint
-      time = timepoint,
-      # Rescaled version
-      pdi_resc = rescale(pdi, xmin = 1 / length(outcomes))) %>%
+      time = timepoint) %>%
     # Relocate indicator
     relocate(outcome, time, .before = pdi) %>%
     # Set to tibble
